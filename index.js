@@ -22,7 +22,8 @@ async function getUser(chatId, username) {
       chatId,
       username: username || "player",
       coins: 100,
-      xp: 0
+      xp: 0,
+      level: 1
     };
     await users.insertOne(u);
   }
@@ -38,8 +39,11 @@ function menu() {
   return {
     reply_markup: {
       inline_keyboard: [
-        [{ text: "🎲 CREATE BATTLE", callback_data: "create_battle" }],
-        [{ text: "⚔️ BATTLES", callback_data: "battles_list" }],
+        [{ text: "⛏ FARM", callback_data: "farm" }],
+        [{ text: "💼 WORK", callback_data: "work" }],
+        [{ text: "📦 CASE", callback_data: "case" }],
+        [{ text: "🎰 CASINO", callback_data: "casino" }],
+        [{ text: "⚔️ PVP", callback_data: "pvp" }],
         [{ text: "👤 PROFILE", callback_data: "profile" }]
       ]
     }
@@ -49,7 +53,7 @@ function menu() {
 // ===== START =====
 bot.onText(/\/start/, async (msg) => {
   await getUser(msg.chat.id, msg.from.username);
-  bot.sendMessage(msg.chat.id, "⚔️ PvP CASINO READY", menu());
+  bot.sendMessage(msg.chat.id, "🎮 FULL GAME STARTED", menu());
 });
 
 // ===== CALLBACK =====
@@ -77,128 +81,123 @@ bot.on("callback_query", async (q) => {
     );
   }
 
-  // ================= CREATE BATTLE
-  if (q.data === "create_battle") {
-    const battle = {
-      creator: chatId,
-      opponent: null,
-      bet: 10,
-      status: "waiting",
-      createdAt: Date.now()
-    };
+  // ================= FARM
+  if (q.data === "farm") {
+    const gain = Math.floor(Math.random() * 10) + 5;
+    u.coins += gain;
+    u.xp += 5;
 
-    const res = await battles.insertOne(battle);
+    await users.updateOne({ chatId }, { $set: u });
+
+    return bot.editMessageText(`⛏ +${gain}`, {
+      chat_id: chatId,
+      message_id: messageId,
+      ...menu()
+    });
+  }
+
+  // ================= WORK
+  if (q.data === "work") {
+    const reward = Math.floor(Math.random() * 40) + 10;
+    u.coins += reward;
+    u.xp += 8;
+
+    await users.updateOne({ chatId }, { $set: u });
+
+    return bot.editMessageText(`💼 +${reward}`, {
+      chat_id: chatId,
+      message_id: messageId,
+      ...menu()
+    });
+  }
+
+  // ================= CASE
+  if (q.data === "case") {
+    const reward = Math.random() < 0.7 ? 15 : 40;
+
+    u.coins += reward;
+
+    await users.updateOne({ chatId }, { $set: u });
+
+    return bot.editMessageText(`📦 +${reward}`, {
+      chat_id: chatId,
+      message_id: messageId,
+      ...menu()
+    });
+  }
+
+  // ================= CASINO MENU
+  if (q.data === "casino") {
+    return bot.editMessageText("🎰 CASINO", {
+      chat_id: chatId,
+      message_id: messageId,
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "🎲 COINFLIP", callback_data: "coinflip" }],
+          [{ text: "🎰 SLOTS", callback_data: "slots" }],
+          [{ text: "⬅ BACK", callback_data: "home" }]
+        ]
+      }
+    });
+  }
+
+  // ================= COINFLIP (FIXED)
+  if (q.data === "coinflip") {
+    const bet = 10;
+
+    if (u.coins < bet) {
+      return bot.answerCallbackQuery(q.id, {
+        text: "❌ Not enough coins",
+        show_alert: true
+      });
+    }
+
+    const win = Math.random() < 0.5;
+
+    u.coins += win ? bet : -bet;
+
+    await users.updateOne({ chatId }, { $set: u });
 
     return bot.editMessageText(
-`⚔️ BATTLE CREATED
-
-Bet: 10 coins
-ID: ${res.insertedId}
-
-Waiting opponent...`,
+win ? "🎉 WIN +10" : "💀 LOSE -10",
       {
         chat_id: chatId,
         message_id: messageId,
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: "🔗 JOIN", callback_data: `join_${res.insertedId}` }],
-            [{ text: "⬅ BACK", callback_data: "back" }]
-          ]
-        }
+        ...menu()
       }
     );
   }
 
-  // ================= LIST
-  if (q.data === "battles_list") {
-    const list = await battles.find({ status: "waiting" }).toArray();
+  // ================= SLOTS (FIXED)
+  if (q.data === "slots") {
+    const bet = 20;
 
-    if (!list.length) {
-      return bot.editMessageText("No battles", {
-        chat_id: chatId,
-        message_id: messageId,
-        ...menu()
-      });
-    }
-
-    return bot.editMessageText(
-`⚔️ BATTLES:
-
-${list.map(b => `ID: ${b._id}`).join("\n")}`,
-      {
-        chat_id: chatId,
-        message_id: messageId,
-        ...menu()
-      }
-    );
-  }
-
-  // ================= JOIN
-  if (q.data.startsWith("join_")) {
-    const id = q.data.split("_")[1];
-
-    let battle;
-    try {
-      battle = await battles.findOne({ _id: new ObjectId(id) });
-    } catch {
+    if (u.coins < bet) {
       return bot.answerCallbackQuery(q.id, {
-        text: "Invalid battle",
+        text: "❌ Not enough coins",
         show_alert: true
       });
     }
 
-    if (!battle) {
-      return bot.answerCallbackQuery(q.id, {
-        text: "Not found",
-        show_alert: true
-      });
-    }
+    const s = ["🍒", "🍋", "💎", "7️⃣"];
+    const r1 = s[Math.floor(Math.random() * s.length)];
+    const r2 = s[Math.floor(Math.random() * s.length)];
+    const r3 = s[Math.floor(Math.random() * s.length)];
 
-    if (battle.creator === chatId) {
-      return bot.answerCallbackQuery(q.id, {
-        text: "You can't join yourself",
-        show_alert: true
-      });
-    }
+    let text = `🎰 ${r1} | ${r2} | ${r3}\n\n`;
 
-    if (battle.status !== "waiting") {
-      return bot.answerCallbackQuery(q.id, {
-        text: "Already started",
-        show_alert: true
-      });
-    }
-
-    await battles.updateOne(
-      { _id: battle._id },
-      { $set: { opponent: chatId, status: "playing" } }
-    );
-
-    const roll1 = Math.floor(Math.random() * 6) + 1;
-    const roll2 = Math.floor(Math.random() * 6) + 1;
-
-    let text = `🎲 DICE BATTLE\n\n`;
-    text += `Player 1: ${roll1}\nPlayer 2: ${roll2}\n\n`;
-
-    let winner = null;
-
-    if (roll1 > roll2) winner = battle.creator;
-    else if (roll2 > roll1) winner = chatId;
-
-    if (winner) {
-      await users.updateOne(
-        { chatId: winner },
-        { $inc: { coins: battle.bet * 2 } }
-      );
-
-      text += `🏆 Winner: ${winner}`;
+    if (r1 === r2 && r2 === r3) {
+      u.coins += bet * 5;
+      text += "💎 JACKPOT x5";
+    } else if (r1 === r2 || r2 === r3 || r1 === r3) {
+      u.coins += bet * 2;
+      text += "🎉 WIN x2";
     } else {
-      text += "🤝 Draw";
+      u.coins -= bet;
+      text += "💀 LOSE";
     }
 
-    await battles.updateOne(
-      { _id: battle._id },
-      { $set: { status: "finished" } }
-    );
+    await users.updateOne({ chatId }, { $set: u });
 
     return bot.editMessageText(text, {
       chat_id: chatId,
@@ -207,9 +206,26 @@ ${list.map(b => `ID: ${b._id}`).join("\n")}`,
     });
   }
 
-  // ================= BACK
-  if (q.data === "back") {
-    return bot.editMessageText("🎮 MENU", {
+  // ================= PVP (SIMPLE FIXED)
+  if (q.data === "pvp") {
+    const roll1 = Math.floor(Math.random() * 6) + 1;
+    const roll2 = Math.floor(Math.random() * 6) + 1;
+
+    let text = `⚔️ PVP\n\nYou: ${roll1}\nEnemy: ${roll2}\n\n`;
+
+    if (roll1 > roll2) {
+      u.coins += 20;
+      text += "🏆 WIN +20";
+    } else if (roll2 > roll1) {
+      u.coins -= 10;
+      text += "💀 LOSE -10";
+    } else {
+      text += "🤝 DRAW";
+    }
+
+    await users.updateOne({ chatId }, { $set: u });
+
+    return bot.editMessageText(text, {
       chat_id: chatId,
       message_id: messageId,
       ...menu()
@@ -217,4 +233,4 @@ ${list.map(b => `ID: ${b._id}`).join("\n")}`,
   }
 });
 
-console.log("⚔️ PvP CASINO RUNNING (STABLE)");
+console.log("🚀 FULL GAME RUNNING (FIXED CASINO)");
