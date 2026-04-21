@@ -12,6 +12,9 @@ await client.connect();
 const db = client.db("game");
 const users = db.collection("users");
 
+// ===== CONFIG =====
+const CHANNEL = "PVEmpire1";
+
 // ===== USER =====
 async function getUser(chatId, username) {
   let u = await users.findOne({ chatId });
@@ -221,14 +224,14 @@ bot.on("callback_query", async (q) => {
     return bot.editMessageText(
 `📜 TASKS
 
-1️⃣ Visit site
+1️⃣ Subscribe to channel
 Reward: +20 coins`,
       {
         chat_id: chatId,
         message_id: messageId,
         reply_markup: {
           inline_keyboard: [
-            [{ text: "🌐 GO", callback_data: "task_go_1" }],
+            [{ text: "🌐 OPEN CHANNEL", url: "https://t.me/PVEmpire1" }],
             [{ text: "✅ CHECK", callback_data: "task_check_1" }],
             [{ text: "⬅ BACK", callback_data: "home" }]
           ]
@@ -237,41 +240,46 @@ Reward: +20 coins`,
     );
   }
 
-  // ===== GO
-  if (q.data === "task_go_1") {
-    u.tasks.link1 = true;
-    await users.updateOne({ chatId }, { $set: u });
-
-    return bot.answerCallbackQuery(q.id, {
-      url: "https://example.com"
-    });
-  }
-
-  // ===== CHECK
+  // ===== CHECK SUB
   if (q.data === "task_check_1") {
-    if (!u.tasks.link1) {
+    try {
+      const res = await bot.getChatMember("@PVEmpire1", chatId);
+
+      const isMember =
+        res.status === "member" ||
+        res.status === "administrator" ||
+        res.status === "creator";
+
+      if (!isMember) {
+        return bot.answerCallbackQuery(q.id, {
+          text: "❌ Not subscribed",
+          show_alert: true
+        });
+      }
+
+      if (u.tasks.sub === "done") {
+        return bot.answerCallbackQuery(q.id, {
+          text: "Already done"
+        });
+      }
+
+      u.tasks.sub = "done";
+      u.coins += 20;
+
+      await users.updateOne({ chatId }, { $set: u });
+
+      return bot.editMessageText("✅ +20 coins", {
+        chat_id: chatId,
+        message_id: messageId,
+        ...menu()
+      });
+
+    } catch (e) {
       return bot.answerCallbackQuery(q.id, {
-        text: "❌ Click GO first",
+        text: "⚠️ Error checking",
         show_alert: true
       });
     }
-
-    if (u.tasks.link1 === "done") {
-      return bot.answerCallbackQuery(q.id, {
-        text: "Already done"
-      });
-    }
-
-    u.tasks.link1 = "done";
-    u.coins += 20;
-
-    await users.updateOne({ chatId }, { $set: u });
-
-    return bot.editMessageText("✅ +20 coins", {
-      chat_id: chatId,
-      message_id: messageId,
-      ...menu()
-    });
   }
 
   // ================= PROFILE
