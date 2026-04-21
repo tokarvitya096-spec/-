@@ -12,8 +12,7 @@ await client.connect();
 const db = client.db("game");
 const users = db.collection("users");
 
-// ===== CONFIG =====
-const CHANNEL = "PVEmpire1";
+const CHANNEL = "@PVEmpire1";
 
 // ===== USER =====
 async function getUser(chatId, username) {
@@ -84,7 +83,7 @@ bot.on("callback_query", async (q) => {
 
   bot.answerCallbackQuery(q.id).catch(() => {});
 
-  // ================= HOME
+  // ===== HOME
   if (q.data === "home") {
     return bot.editMessageText("🏠 MENU", {
       chat_id: chatId,
@@ -93,133 +92,7 @@ bot.on("callback_query", async (q) => {
     });
   }
 
-  // ================= FARM
-  if (q.data === "tab_farm") {
-    return bot.editMessageText("⛏ FARM", {
-      chat_id: chatId,
-      message_id: messageId,
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: "⛏ FARM", callback_data: "farm" }],
-          [{ text: "⬅ BACK", callback_data: "home" }]
-        ]
-      }
-    });
-  }
-
-  if (q.data === "farm") {
-    const cd = 6 * 60 * 60 * 1000;
-
-    if (now - u.lastFarm < cd) {
-      const h = Math.ceil((cd - (now - u.lastFarm)) / 3600000);
-      return bot.editMessageText(`⛏ cooldown ${h}h`, {
-        chat_id: chatId,
-        message_id: messageId,
-        ...menu()
-      });
-    }
-
-    const gain = Math.floor(Math.random() * 10) + 5;
-
-    u.coins += gain;
-    u.xp += 5;
-    u.level = level(u.xp);
-    u.lastFarm = now;
-
-    await users.updateOne({ chatId }, { $set: u });
-
-    return bot.editMessageText(`⛏ +${gain}`, {
-      chat_id: chatId,
-      message_id: messageId,
-      ...menu()
-    });
-  }
-
-  // ================= WORK
-  if (q.data === "tab_work") {
-    return bot.editMessageText("💼 WORK", {
-      chat_id: chatId,
-      message_id: messageId,
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: "💼 WORK", callback_data: "work" }],
-          [{ text: "⬅ BACK", callback_data: "home" }]
-        ]
-      }
-    });
-  }
-
-  if (q.data === "work") {
-    const cd = 3 * 60 * 60 * 1000;
-
-    if (now - u.lastWork < cd) {
-      const h = Math.ceil((cd - (now - u.lastWork)) / 3600000);
-      return bot.editMessageText(`💼 cooldown ${h}h`, {
-        chat_id: chatId,
-        message_id: messageId,
-        ...menu()
-      });
-    }
-
-    const reward =
-      Math.random() < 0.7 ? 10 :
-      Math.random() < 0.95 ? 25 : 50;
-
-    u.coins += reward;
-    u.xp += 8;
-    u.level = level(u.xp);
-    u.lastWork = now;
-
-    await users.updateOne({ chatId }, { $set: u });
-
-    return bot.editMessageText(`💼 +${reward}`, {
-      chat_id: chatId,
-      message_id: messageId,
-      ...menu()
-    });
-  }
-
-  // ================= CASE
-  if (q.data === "tab_case") {
-    return bot.editMessageText("📦 CASE", {
-      chat_id: chatId,
-      message_id: messageId,
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: "📦 OPEN", callback_data: "case" }],
-          [{ text: "⬅ BACK", callback_data: "home" }]
-        ]
-      }
-    });
-  }
-
-  if (q.data === "case") {
-    const cd = 24 * 60 * 60 * 1000;
-
-    if (now - u.lastCase < cd) {
-      const h = Math.ceil((cd - (now - u.lastCase)) / 3600000);
-      return bot.editMessageText(`📦 cooldown ${h}h`, {
-        chat_id: chatId,
-        message_id: messageId,
-        ...menu()
-      });
-    }
-
-    const reward = Math.random() < 0.7 ? 15 : 40;
-
-    u.coins += reward;
-    u.lastCase = now;
-
-    await users.updateOne({ chatId }, { $set: u });
-
-    return bot.editMessageText(`📦 +${reward}`, {
-      chat_id: chatId,
-      message_id: messageId,
-      ...menu()
-    });
-  }
-
-  // ================= TASKS
+  // ===== TASKS
   if (q.data === "tab_tasks") {
     return bot.editMessageText(
 `📜 TASKS
@@ -240,10 +113,12 @@ Reward: +20 coins`,
     );
   }
 
-  // ===== CHECK SUB
+  // ===== CHECK SUB (З DEBUG)
   if (q.data === "task_check_1") {
     try {
-      const res = await bot.getChatMember("@PVEmpire1", chatId);
+      const res = await bot.getChatMember(CHANNEL, chatId);
+
+      console.log("CHAT MEMBER:", res);
 
       const isMember =
         res.status === "member" ||
@@ -275,14 +150,16 @@ Reward: +20 coins`,
       });
 
     } catch (e) {
+      console.log("ERROR:", e);
+
       return bot.answerCallbackQuery(q.id, {
-        text: "⚠️ Error checking",
+        text: "⚠️ ERROR: " + e.message,
         show_alert: true
       });
     }
   }
 
-  // ================= PROFILE
+  // ===== PROFILE
   if (q.data === "tab_profile") {
     return bot.editMessageText(
 `👤 PROFILE
@@ -303,4 +180,4 @@ Reward: +20 coins`,
   }
 });
 
-console.log("🚀 GAME READY");
+console.log("🚀 BOT RUNNING");
