@@ -1,7 +1,6 @@
 import dotenv from "dotenv";
 import TelegramBot from "node-telegram-bot-api";
 import { MongoClient } from "mongodb";
-import axios from "axios";
 
 dotenv.config();
 
@@ -12,8 +11,6 @@ await client.connect();
 
 const db = client.db("game");
 const users = db.collection("users");
-
-const pendingCards = new Map();
 
 // ================= USER =================
 async function getUser(chatId, username) {
@@ -42,7 +39,7 @@ function menu(u) {
 💰 Coins: ${u.coins}
 💎 Diamonds: ${u.diamonds}
 
-Оберіть:`,
+Вибери:`,
     options: {
       reply_markup: {
         inline_keyboard: [
@@ -72,7 +69,7 @@ bot.onText(/\/start/, async (msg) => {
   bot.sendMessage(msg.chat.id, ui.text, ui.options);
 });
 
-// ================= DONATE MENU =================
+// ================= CALLBACK =================
 bot.on("callback_query", async (q) => {
   const chatId = q.message.chat.id;
   const messageId = q.message.message_id;
@@ -120,6 +117,7 @@ bot.on("callback_query", async (q) => {
   if (q.data === "case") {
     const r = Math.random() < 0.7 ? 15 : 40;
     u.coins += r;
+
     await users.updateOne({ chatId }, { $set: u });
 
     return bot.editMessageText(`📦 CASE +${r}`, {
@@ -152,8 +150,8 @@ bot.on("callback_query", async (q) => {
     return bot.editMessageText(
 `👤 PROFILE
 
-💰 ${u.coins}
-💎 ${u.diamonds}`,
+💰 Coins: ${u.coins}
+💎 Diamonds: ${u.diamonds}`,
       {
         chat_id: chatId,
         message_id: messageId,
@@ -169,17 +167,17 @@ bot.on("callback_query", async (q) => {
     return bot.editMessageText(
 `💳 DONATE
 
-💎 Crypto (auto)
-💳 Card (manual)
+💳 Card = manual
+₿ Crypto = later
 
-Вибери:`,
+📌 20₴ = 20💎
+
+Надішли квитанцію після оплати`,
       {
         chat_id: chatId,
         message_id: messageId,
         reply_markup: {
           inline_keyboard: [
-            [{ text: "₿ Crypto", callback_data: "crypto" }],
-            [{ text: "💳 Card", callback_data: "card" }],
             [{ text: "⬅ BACK", callback_data: "home" }]
           ]
         }
@@ -187,64 +185,18 @@ bot.on("callback_query", async (q) => {
     );
   }
 
-  // ================= CARD =================
-  if (q.data === "card") {
-    return bot.sendMessage(chatId,
-`💳 CARD PAYMENT
-
-💰 20₴ = 20💎
-
-📌 Карта:
-4400 0055 5011 1519
-5355 2800 2890 2177
-
-📩 Надішли фото квитанції сюди`);
-  }
-
-  // ================= CARD RECEIPT =================
-  if (q.message.photo) {
-    const fileId = q.message.photo?.slice(-1)[0].file_id;
-
-    pendingCards.set(chatId, fileId);
-
-    const ADMIN_ID = process.env.ADMIN_ID;
-
-    bot.sendMessage(ADMIN_ID,
-`💳 NEW CARD PAYMENT
-User: ${chatId}`,
-{
+  // ================= DICE (player controlled) =================
+  if (q.data === "dice") {
+    return bot.sendMessage(chatId, "🎲 Натисни щоб кинути куб", {
       reply_markup: {
         inline_keyboard: [
-          [
-            { text: "✅ APPROVE", callback_data: `approve_${chatId}` },
-            { text: "❌ REJECT", callback_data: `reject_${chatId}` }
-          ]
+          [{ text: "🎲 ROLL", callback_data: "roll_dice" }]
         ]
       }
     });
-
-    bot.sendPhoto(ADMIN_ID, fileId);
   }
 
-  // ================= ADMIN =================
-  if (q.data.startsWith("approve_")) {
-    const id = q.data.split("_")[1];
-
-    await users.updateOne(
-      { chatId: Number(id) },
-      { $inc: { diamonds: 20 } }
-    );
-
-    return bot.sendMessage(id, "✅ +20💎 added");
-  }
-
-  if (q.data.startsWith("reject_")) {
-    const id = q.data.split("_")[1];
-    return bot.sendMessage(id, "❌ rejected");
-  }
-
-  // ================= DICE =================
-  if (q.data === "dice") {
+  if (q.data === "roll_dice") {
     return bot.sendDice(chatId).then(async (msg) => {
       const v = msg.dice.value;
 
@@ -265,7 +217,6 @@ User: ${chatId}`,
   // ================= DARTS =================
   if (q.data === "darts") {
     const hit = Math.random();
-
     const reward = hit > 0.9 ? 1.5 : 1.05;
 
     u.diamonds += reward;
@@ -273,11 +224,55 @@ User: ${chatId}`,
 
     return bot.sendMessage(chatId, `🎯 ${hit > 0.9 ? "CENTER" : "MISS"} +${reward}💎`);
   }
+});
 
-  // ================= CRYPTO =================
-  if (q.data === "crypto") {
-    return bot.sendMessage(chatId, "₿ CryptoBot буде додано через invoice (якщо хочеш — скажеш)");
+// ================= CARD RECEIPT HANDLER =================
+bot.on("photo", async (msg) => {
+  const chatId = msg.chat.id;
+  const fileId = msg.photo[msg.photo.length - 1].file_id;
+
+  const ADMIN_ID = process.env.ADMIN_ID;
+
+  await bot.sendMessage(
+    ADMIN_ID,
+`💳 NEW PAYMENT
+
+User: ${chatId}
+@${msg.from.username || "no_username"}`
+  );
+
+  await bot.sendPhoto(ADMIN_ID, fileId, {
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: "✅ APPROVE", callback_data: `approve_${chatId}` },
+          { text: "❌ REJECT", callback_data: `reject_${chatId}` }
+        ]
+      ]
+    }
+  });
+
+  bot.sendMessage(chatId, "📩 Квитанцію відправлено на перевірку");
+});
+
+// ================= ADMIN ACTIONS =================
+bot.on("callback_query", async (q) => {
+  if (!q.data.startsWith("approve_") && !q.data.startsWith("reject_")) return;
+
+  const chatId = Number(q.data.split("_")[1]);
+
+  if (q.data.startsWith("approve_")) {
+    await users.updateOne(
+      { chatId },
+      { $inc: { diamonds: 20 } }
+    );
+
+    bot.sendMessage(chatId, "✅ +20💎 зараховано");
+  }
+
+  if (q.data.startsWith("reject_")) {
+    bot.sendMessage(chatId, "❌ платіж відхилено");
   }
 });
 
-console.log("🚀 FULL GAME RUNNING");
+console.log("🚀 FULL GAME RUNNING FIXED");
