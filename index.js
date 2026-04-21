@@ -98,7 +98,7 @@ bot.on("callback_query", async (q) => {
 
   bot.answerCallbackQuery(q.id);
 
-  // ================= HOME =================
+  // HOME
   if (q.data === "home") {
     const ui = menu(u);
 
@@ -109,7 +109,7 @@ bot.on("callback_query", async (q) => {
     });
   }
 
-  // ================= FARM =================
+  // FARM
   if (q.data === "farm") {
     u.coins += 10;
     await users.updateOne({ chatId }, { $set: u });
@@ -121,7 +121,7 @@ bot.on("callback_query", async (q) => {
     });
   }
 
-  // ================= WORK =================
+  // WORK
   if (q.data === "work") {
     u.coins += 20;
     await users.updateOne({ chatId }, { $set: u });
@@ -133,7 +133,7 @@ bot.on("callback_query", async (q) => {
     });
   }
 
-  // ================= CASE =================
+  // CASE
   if (q.data === "case") {
     const reward = Math.random() < 0.7 ? 15 : 40;
     u.coins += reward;
@@ -147,7 +147,7 @@ bot.on("callback_query", async (q) => {
     });
   }
 
-  // ================= CASINO =================
+  // CASINO
   if (q.data === "casino") {
     return bot.editMessageText(
 `🎰 CASINO`,
@@ -165,13 +165,13 @@ bot.on("callback_query", async (q) => {
     );
   }
 
-  // ================= PROFILE =================
+  // PROFILE
   if (q.data === "profile") {
     return bot.editMessageText(
 `👤 PROFILE
 
-💰 ${u.coins}
-💎 ${u.diamonds}`,
+💰 Coins: ${u.coins}
+💎 Diamonds: ${u.diamonds}`,
       {
         chat_id: chatId,
         message_id: messageId,
@@ -182,15 +182,15 @@ bot.on("callback_query", async (q) => {
     );
   }
 
-  // ================= DONATE MENU =================
+  // DONATE MENU
   if (q.data === "donate") {
     return bot.editMessageText(
-`💳 DONATE SYSTEM
+`💳 DONATE
 
-💡 Мінімум: 0.5$
-💡 Максимум: ∞
+💡 Мінімум: 0.50$
+💎 Курс: 0.50$ = 20💎
 
-Введи суму (USD):`,
+👉 Введи суму в чат (USD)`,
       {
         chat_id: chatId,
         message_id: messageId
@@ -206,17 +206,19 @@ bot.on("message", async (msg) => {
   const chatId = msg.chat.id;
   const text = msg.text;
 
-  const u = await getUser(chatId, msg.from.username);
+  // ignore commands
+  if (text.startsWith("/")) return;
 
   const amount = parseFloat(text);
 
   if (isNaN(amount)) return;
 
   if (amount < 0.5) {
-    return bot.sendMessage(chatId, "❌ Мінімум 0.5$");
+    return bot.sendMessage(chatId, "❌ Мінімум 0.50$");
   }
 
-  const diamonds = Math.floor(amount * 2); // 1$ = 2💎
+  // 💎 NEW RATE: 0.50$ = 20💎 → 1$ = 40💎
+  const diamonds = Math.floor(amount * 40);
 
   const url = await createInvoice(amount, chatId, diamonds);
 
@@ -233,4 +235,4 @@ bot.on("message", async (msg) => {
   );
 });
 
-console.log("🚀 FULL GAME + DYNAMIC DONATE RUNNING");
+console.log("🚀 FULL GAME RUNNING (UPDATED RATE 0.50$ = 20💎)");
