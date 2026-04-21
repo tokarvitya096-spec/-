@@ -13,6 +13,8 @@ await client.connect();
 const db = client.db("game");
 const users = db.collection("users");
 
+const pendingCards = new Map();
+
 // ================= USER =================
 async function getUser(chatId, username) {
   let u = await users.findOne({ chatId });
@@ -40,7 +42,7 @@ function menu(u) {
 💰 Coins: ${u.coins}
 💎 Diamonds: ${u.diamonds}
 
-Вибери вкладку:`,
+Оберіть:`,
     options: {
       reply_markup: {
         inline_keyboard: [
@@ -70,26 +72,7 @@ bot.onText(/\/start/, async (msg) => {
   bot.sendMessage(msg.chat.id, ui.text, ui.options);
 });
 
-// ================= CREATE INVOICE =================
-async function createInvoice(amountUSD, chatId, diamonds) {
-  const res = await axios.post(
-    "https://pay.crypt.bot/api/createInvoice",
-    {
-      asset: "USDT",
-      amount: amountUSD,
-      payload: JSON.stringify({ chatId, diamonds })
-    },
-    {
-      headers: {
-        "Crypto-Pay-API-Token": process.env.CRYPTOBOT_TOKEN
-      }
-    }
-  );
-
-  return res.data.result.pay_url;
-}
-
-// ================= CALLBACK =================
+// ================= DONATE MENU =================
 bot.on("callback_query", async (q) => {
   const chatId = q.message.chat.id;
   const messageId = q.message.message_id;
@@ -135,19 +118,18 @@ bot.on("callback_query", async (q) => {
 
   // CASE
   if (q.data === "case") {
-    const reward = Math.random() < 0.7 ? 15 : 40;
-    u.coins += reward;
-
+    const r = Math.random() < 0.7 ? 15 : 40;
+    u.coins += r;
     await users.updateOne({ chatId }, { $set: u });
 
-    return bot.editMessageText(`📦 CASE +${reward}`, {
+    return bot.editMessageText(`📦 CASE +${r}`, {
       chat_id: chatId,
       message_id: messageId,
       ...menu(u).options
     });
   }
 
-  // CASINO
+  // CASINO MENU
   if (q.data === "casino") {
     return bot.editMessageText(
 `🎰 CASINO`,
@@ -170,8 +152,8 @@ bot.on("callback_query", async (q) => {
     return bot.editMessageText(
 `👤 PROFILE
 
-💰 Coins: ${u.coins}
-💎 Diamonds: ${u.diamonds}`,
+💰 ${u.coins}
+💎 ${u.diamonds}`,
       {
         chat_id: chatId,
         message_id: messageId,
@@ -187,52 +169,115 @@ bot.on("callback_query", async (q) => {
     return bot.editMessageText(
 `💳 DONATE
 
-💡 Мінімум: 0.50$
-💎 Курс: 0.50$ = 20💎
+💎 Crypto (auto)
+💳 Card (manual)
 
-👉 Введи суму в чат (USD)`,
+Вибери:`,
       {
         chat_id: chatId,
-        message_id: messageId
+        message_id: messageId,
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "₿ Crypto", callback_data: "crypto" }],
+            [{ text: "💳 Card", callback_data: "card" }],
+            [{ text: "⬅ BACK", callback_data: "home" }]
+          ]
+        }
       }
     );
   }
-});
 
-// ================= TEXT INPUT (DONATE AMOUNT) =================
-bot.on("message", async (msg) => {
-  if (!msg.text) return;
+  // ================= CARD =================
+  if (q.data === "card") {
+    return bot.sendMessage(chatId,
+`💳 CARD PAYMENT
 
-  const chatId = msg.chat.id;
-  const text = msg.text;
+💰 20₴ = 20💎
 
-  // ignore commands
-  if (text.startsWith("/")) return;
+📌 Карта:
+4400 0055 5011 1519
+5355 2800 2890 2177
 
-  const amount = parseFloat(text);
-
-  if (isNaN(amount)) return;
-
-  if (amount < 0.5) {
-    return bot.sendMessage(chatId, "❌ Мінімум 0.50$");
+📩 Надішли фото квитанції сюди`);
   }
 
-  // 💎 NEW RATE: 0.50$ = 20💎 → 1$ = 40💎
-  const diamonds = Math.floor(amount * 40);
+  // ================= CARD RECEIPT =================
+  if (q.message.photo) {
+    const fileId = q.message.photo?.slice(-1)[0].file_id;
 
-  const url = await createInvoice(amount, chatId, diamonds);
+    pendingCards.set(chatId, fileId);
 
-  bot.sendMessage(
-    chatId,
-    `💳 Pay ${amount}$ → ${diamonds}💎`,
-    {
+    const ADMIN_ID = process.env.ADMIN_ID;
+
+    bot.sendMessage(ADMIN_ID,
+`💳 NEW CARD PAYMENT
+User: ${chatId}`,
+{
       reply_markup: {
         inline_keyboard: [
-          [{ text: "PAY", url }]
+          [
+            { text: "✅ APPROVE", callback_data: `approve_${chatId}` },
+            { text: "❌ REJECT", callback_data: `reject_${chatId}` }
+          ]
         ]
       }
-    }
-  );
+    });
+
+    bot.sendPhoto(ADMIN_ID, fileId);
+  }
+
+  // ================= ADMIN =================
+  if (q.data.startsWith("approve_")) {
+    const id = q.data.split("_")[1];
+
+    await users.updateOne(
+      { chatId: Number(id) },
+      { $inc: { diamonds: 20 } }
+    );
+
+    return bot.sendMessage(id, "✅ +20💎 added");
+  }
+
+  if (q.data.startsWith("reject_")) {
+    const id = q.data.split("_")[1];
+    return bot.sendMessage(id, "❌ rejected");
+  }
+
+  // ================= DICE =================
+  if (q.data === "dice") {
+    return bot.sendDice(chatId).then(async (msg) => {
+      const v = msg.dice.value;
+
+      let reward =
+        v === 1 ? 1.1 :
+        v === 2 ? 1.2 :
+        v === 3 ? 1.4 :
+        v === 4 ? 1.6 :
+        v === 5 ? 1.8 : 2;
+
+      u.diamonds += reward;
+      await users.updateOne({ chatId }, { $set: u });
+
+      bot.sendMessage(chatId, `🎲 ${v} → +${reward}💎`);
+    });
+  }
+
+  // ================= DARTS =================
+  if (q.data === "darts") {
+    const hit = Math.random();
+
+    const reward = hit > 0.9 ? 1.5 : 1.05;
+
+    u.diamonds += reward;
+    await users.updateOne({ chatId }, { $set: u });
+
+    return bot.sendMessage(chatId, `🎯 ${hit > 0.9 ? "CENTER" : "MISS"} +${reward}💎`);
+  }
+
+  // ================= CRYPTO =================
+  if (q.data === "crypto") {
+    return bot.sendMessage(chatId, "₿ CryptoBot буде додано через invoice (якщо хочеш — скажеш)");
+  }
 });
 
-console.log("🚀 FULL GAME RUNNING (UPDATED RATE 0.50$ = 20💎)");
+console.log("🚀 FULL GAME RUNNING");
