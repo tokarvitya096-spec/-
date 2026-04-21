@@ -1,11 +1,15 @@
 import dotenv from "dotenv";
 import TelegramBot from "node-telegram-bot-api";
 import { MongoClient } from "mongodb";
+import axios from "axios";
+import express from "express";
 
 dotenv.config();
 
+// ================= BOT =================
 const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
 
+// ================= DB =================
 const client = new MongoClient(process.env.MONGO_URL);
 await client.connect();
 
@@ -20,8 +24,7 @@ async function getUser(chatId, username) {
     u = {
       chatId,
       username: username || "player",
-      coins: 100,
-      diamonds: 1
+      diamonds: 0
     };
     await users.insertOne(u);
   }
@@ -30,31 +33,20 @@ async function getUser(chatId, username) {
 }
 
 // ================= MENU =================
-function menu(u) {
+function mainMenu(u) {
   return {
     text:
 `🎮 GAME HUB
 
 👤 ${u.username}
-💰 Coins: ${u.coins}
 💎 Diamonds: ${u.diamonds}
 
-Вибери вкладку:`,
+Оберіть:`,
     options: {
       reply_markup: {
         inline_keyboard: [
-          [
-            { text: "⛏ FARM", callback_data: "farm" },
-            { text: "💼 WORK", callback_data: "work" }
-          ],
-          [
-            { text: "📦 CASE", callback_data: "case" },
-            { text: "🎰 CASINO", callback_data: "casino" }
-          ],
-          [
-            { text: "💳 DONATE", callback_data: "donate" },
-            { text: "👤 PROFILE", callback_data: "profile" }
-          ]
+          [{ text: "💳 DONATE", callback_data: "donate" }],
+          [{ text: "👤 PROFILE", callback_data: "profile" }]
         ]
       }
     }
@@ -64,10 +56,29 @@ function menu(u) {
 // ================= START =================
 bot.onText(/\/start/, async (msg) => {
   const u = await getUser(msg.chat.id, msg.from.username);
-  const ui = menu(u);
+  const ui = mainMenu(u);
 
   bot.sendMessage(msg.chat.id, ui.text, ui.options);
 });
+
+// ================= CREATE INVOICE =================
+async function createInvoice(amount, chatId, diamonds) {
+  const res = await axios.post(
+    "https://pay.crypt.bot/api/createInvoice",
+    {
+      asset: "USDT",
+      amount,
+      payload: JSON.stringify({ chatId, diamonds })
+    },
+    {
+      headers: {
+        "Crypto-Pay-API-Token": process.env.CRYPTOBOT_TOKEN
+      }
+    }
+  );
+
+  return res.data.result.pay_url;
+}
 
 // ================= CALLBACK =================
 bot.on("callback_query", async (q) => {
@@ -76,14 +87,24 @@ bot.on("callback_query", async (q) => {
 
   const u = await getUser(chatId, q.from.username);
 
-  bot.answerCallbackQuery(q.id).catch(() => {});
+  bot.answerCallbackQuery(q.id);
+
+  // ================= HOME =================
+  if (q.data === "home") {
+    const ui = mainMenu(u);
+
+    return bot.editMessageText(ui.text, {
+      chat_id: chatId,
+      message_id: messageId,
+      ...ui.options
+    });
+  }
 
   // ================= PROFILE =================
   if (q.data === "profile") {
     return bot.editMessageText(
 `👤 PROFILE
 
-💰 Coins: ${u.coins}
 💎 Diamonds: ${u.diamonds}`,
       {
         chat_id: chatId,
@@ -97,188 +118,76 @@ bot.on("callback_query", async (q) => {
     );
   }
 
-  // ================= HOME =================
-  if (q.data === "home") {
-    const ui = menu(u);
-
-    return bot.editMessageText(ui.text, {
-      chat_id: chatId,
-      message_id: messageId,
-      ...ui.options
-    });
-  }
-
-  // ================= FARM =================
-  if (q.data === "farm") {
-    const gain = Math.floor(Math.random() * 10) + 5;
-    u.coins += gain;
-
-    await users.updateOne({ chatId }, { $set: u });
-
-    return bot.editMessageText(`⛏ FARM +${gain}`, {
-      chat_id: chatId,
-      message_id: messageId,
-      ...menu(u).options
-    });
-  }
-
-  // ================= WORK =================
-  if (q.data === "work") {
-    const gain = Math.floor(Math.random() * 30) + 10;
-    u.coins += gain;
-
-    await users.updateOne({ chatId }, { $set: u });
-
-    return bot.editMessageText(`💼 WORK +${gain}`, {
-      chat_id: chatId,
-      message_id: messageId,
-      ...menu(u).options
-    });
-  }
-
-  // ================= CASE =================
-  if (q.data === "case") {
-    const gain = Math.random() < 0.7 ? 15 : 40;
-    u.coins += gain;
-
-    await users.updateOne({ chatId }, { $set: u });
-
-    return bot.editMessageText(`📦 CASE +${gain}`, {
-      chat_id: chatId,
-      message_id: messageId,
-      ...menu(u).options
-    });
-  }
-
-  // ================= CASINO =================
-  if (q.data === "casino") {
-    return bot.editMessageText(
-`🎰 CASINO 💎
-
-Вибери гру:`,
-      {
-        chat_id: chatId,
-        message_id: messageId,
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: "🎲 DICE", callback_data: "dice" }],
-            [{ text: "🎯 DARTS", callback_data: "darts" }],
-            [{ text: "⬅ BACK", callback_data: "home" }]
-          ]
-        }
-      }
-    );
-  }
-
-  // ================= 🎲 DICE =================
-  if (q.data === "dice") {
-    const bet = 1;
-
-    if (u.diamonds < bet) {
-      return bot.answerCallbackQuery(q.id, {
-        text: "❌ Нема 💎",
-        show_alert: true
-      });
-    }
-
-    u.diamonds -= bet;
-
-    const roll = Math.floor(Math.random() * 6) + 1;
-
-    let multi =
-      roll === 1 ? 1.1 :
-      roll === 2 ? 1.2 :
-      roll === 3 ? 1.4 :
-      roll === 4 ? 1.6 :
-      roll === 5 ? 1.8 : 2;
-
-    const win = bet * multi;
-
-    u.diamonds += win;
-
-    await users.updateOne({ chatId }, { $set: u });
-
-    return bot.editMessageText(
-`🎲 DICE
-
-🎯 Roll: ${roll}
-🏆 Win: ${win.toFixed(2)}💎`,
-      {
-        chat_id: chatId,
-        message_id: messageId,
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: "🔁 ROLL AGAIN", callback_data: "dice" }],
-            [{ text: "⬅ BACK", callback_data: "casino" }]
-          ]
-        }
-      }
-    );
-  }
-
-  // ================= 🎯 DARTS =================
-  if (q.data === "darts") {
-    const bet = 1;
-
-    if (u.diamonds < bet) {
-      return bot.answerCallbackQuery(q.id, {
-        text: "❌ Нема 💎",
-        show_alert: true
-      });
-    }
-
-    u.diamonds -= bet;
-
-    const hit = Math.random();
-
-    const win = hit > 0.9 ? 1.5 : 1.05;
-    const reward = bet * win;
-
-    u.diamonds += reward;
-
-    await users.updateOne({ chatId }, { $set: u });
-
-    return bot.editMessageText(
-`🎯 DARTS
-
-📍 Accuracy: ${(hit * 100).toFixed(0)}%
-🏆 Win: ${reward.toFixed(2)}💎`,
-      {
-        chat_id: chatId,
-        message_id: messageId,
-        reply_markup: {
-          inline_keyboard: [
-            [{ text: "🔁 THROW AGAIN", callback_data: "darts" }],
-            [{ text: "⬅ BACK", callback_data: "casino" }]
-          ]
-        }
-      }
-    );
-  }
-
-  // ================= DONATE =================
+  // ================= DONATE MENU =================
   if (q.data === "donate") {
     return bot.editMessageText(
 `💳 DONATE
 
-⭐ Telegram Stars
-₿ CryptoBot
-💳 Card (soon)
+1💎 = 2₴
 
-Після оплати отримуєш 💎`,
+Оберіть пакет:`,
       {
         chat_id: chatId,
         message_id: messageId,
         reply_markup: {
           inline_keyboard: [
-            [{ text: "⭐ STARS", url: "https://t.me/PVEmpire1" }],
-            [{ text: "₿ CRYPTOBOT", url: "https://t.me/CryptoBot" }],
+            [{ text: "💎 5 = 10₴", callback_data: "d10" }],
+            [{ text: "💎 10 = 20₴", callback_data: "d20" }],
             [{ text: "⬅ BACK", callback_data: "home" }]
           ]
         }
       }
     );
   }
+
+  // ================= PACK 10₴ =================
+  if (q.data === "d10") {
+    const url = await createInvoice(10, chatId, 5);
+
+    return bot.sendMessage(chatId, "💳 Pay 10₴ → 5💎", {
+      reply_markup: {
+        inline_keyboard: [[{ text: "PAY", url }]]
+      }
+    });
+  }
+
+  // ================= PACK 20₴ =================
+  if (q.data === "d20") {
+    const url = await createInvoice(20, chatId, 10);
+
+    return bot.sendMessage(chatId, "💳 Pay 20₴ → 10💎", {
+      reply_markup: {
+        inline_keyboard: [[{ text: "PAY", url }]]
+      }
+    });
+  }
 });
 
-console.log("🚀 FULL BOT RUNNING CLEAN VERSION");
+// ================= WEBHOOK SERVER =================
+const app = express();
+app.use(express.json());
+
+app.post("/crypto-webhook", async (req, res) => {
+  const data = req.body;
+
+  try {
+    if (data.status === "paid") {
+      const payload = JSON.parse(data.payload);
+
+      await users.updateOne(
+        { chatId: payload.chatId },
+        { $inc: { diamonds: payload.diamonds } }
+      );
+
+      console.log("💎 Added:", payload.diamonds);
+    }
+  } catch (e) {
+    console.log("Webhook error:", e);
+  }
+
+  res.sendStatus(200);
+});
+
+app.listen(process.env.PORT || 3000, () => {
+  console.log("🚀 Bot + Webhook running");
+});
