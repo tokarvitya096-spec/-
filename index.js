@@ -21,7 +21,7 @@ async function getUser(chatId, username) {
       chatId,
       username: username || "player",
       coins: 100,
-      diamonds: 0
+      diamonds: 1
     };
     await users.insertOne(u);
   }
@@ -30,7 +30,7 @@ async function getUser(chatId, username) {
 }
 
 // ================= MENU =================
-function mainMenu(u) {
+function menu(u) {
   return {
     text:
 `🎮 GAME HUB
@@ -39,7 +39,7 @@ function mainMenu(u) {
 💰 Coins: ${u.coins}
 💎 Diamonds: ${u.diamonds}
 
-Оберіть вкладку:`,
+Вибери вкладку:`,
     options: {
       reply_markup: {
         inline_keyboard: [
@@ -52,31 +52,9 @@ function mainMenu(u) {
             { text: "🎰 CASINO", callback_data: "casino" }
           ],
           [
-            { text: "⚔️ PVP", callback_data: "pvp" },
-            { text: "💳 DONATE", callback_data: "donate" }
-          ],
-          [
+            { text: "💳 DONATE", callback_data: "donate" },
             { text: "👤 PROFILE", callback_data: "profile" }
           ]
-        ]
-      }
-    }
-  };
-}
-
-// ================= CASINO =================
-function casinoMenu() {
-  return {
-    text:
-`🎰 CASINO 💎
-
-Оберіть гру:`,
-    options: {
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: "🎲 DICE (сам кидаєш)", callback_data: "dice" }],
-          [{ text: "🎯 DARTS (сам кидаєш)", callback_data: "darts" }],
-          [{ text: "⬅ BACK", callback_data: "home" }]
         ]
       }
     }
@@ -86,7 +64,7 @@ function casinoMenu() {
 // ================= START =================
 bot.onText(/\/start/, async (msg) => {
   const u = await getUser(msg.chat.id, msg.from.username);
-  const ui = mainMenu(u);
+  const ui = menu(u);
 
   bot.sendMessage(msg.chat.id, ui.text, ui.options);
 });
@@ -100,17 +78,6 @@ bot.on("callback_query", async (q) => {
 
   bot.answerCallbackQuery(q.id).catch(() => {});
 
-  // ================= HOME =================
-  if (q.data === "home") {
-    const ui = mainMenu(u);
-
-    return bot.editMessageText(ui.text, {
-      chat_id: chatId,
-      message_id: messageId,
-      ...ui.options
-    });
-  }
-
   // ================= PROFILE =================
   if (q.data === "profile") {
     return bot.editMessageText(
@@ -122,10 +89,23 @@ bot.on("callback_query", async (q) => {
         chat_id: chatId,
         message_id: messageId,
         reply_markup: {
-          inline_keyboard: [[{ text: "⬅ BACK", callback_data: "home" }]]
+          inline_keyboard: [
+            [{ text: "⬅ BACK", callback_data: "home" }]
+          ]
         }
       }
     );
+  }
+
+  // ================= HOME =================
+  if (q.data === "home") {
+    const ui = menu(u);
+
+    return bot.editMessageText(ui.text, {
+      chat_id: chatId,
+      message_id: messageId,
+      ...ui.options
+    });
   }
 
   // ================= FARM =================
@@ -138,7 +118,7 @@ bot.on("callback_query", async (q) => {
     return bot.editMessageText(`⛏ FARM +${gain}`, {
       chat_id: chatId,
       message_id: messageId,
-      ...mainMenu(u).options
+      ...menu(u).options
     });
   }
 
@@ -152,7 +132,7 @@ bot.on("callback_query", async (q) => {
     return bot.editMessageText(`💼 WORK +${gain}`, {
       chat_id: chatId,
       message_id: messageId,
-      ...mainMenu(u).options
+      ...menu(u).options
     });
   }
 
@@ -166,22 +146,31 @@ bot.on("callback_query", async (q) => {
     return bot.editMessageText(`📦 CASE +${gain}`, {
       chat_id: chatId,
       message_id: messageId,
-      ...mainMenu(u).options
+      ...menu(u).options
     });
   }
 
   // ================= CASINO =================
   if (q.data === "casino") {
-    const ui = casinoMenu();
+    return bot.editMessageText(
+`🎰 CASINO 💎
 
-    return bot.editMessageText(ui.text, {
-      chat_id: chatId,
-      message_id: messageId,
-      ...ui.options
-    });
+Вибери гру:`,
+      {
+        chat_id: chatId,
+        message_id: messageId,
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "🎲 DICE", callback_data: "dice" }],
+            [{ text: "🎯 DARTS", callback_data: "darts" }],
+            [{ text: "⬅ BACK", callback_data: "home" }]
+          ]
+        }
+      }
+    );
   }
 
-  // ================= 🎲 DICE (PLAYER CLICKS) =================
+  // ================= 🎲 DICE =================
   if (q.data === "dice") {
     const bet = 1;
 
@@ -213,14 +202,13 @@ bot.on("callback_query", async (q) => {
 `🎲 DICE
 
 🎯 Roll: ${roll}
-💎 Bet: 1
 🏆 Win: ${win.toFixed(2)}💎`,
       {
         chat_id: chatId,
         message_id: messageId,
         reply_markup: {
           inline_keyboard: [
-            [{ text: "🎲 ROLL AGAIN", callback_data: "dice" }],
+            [{ text: "🔁 ROLL AGAIN", callback_data: "dice" }],
             [{ text: "⬅ BACK", callback_data: "casino" }]
           ]
         }
@@ -243,8 +231,7 @@ bot.on("callback_query", async (q) => {
 
     const hit = Math.random();
 
-    let win = hit > 0.9 ? 1.5 : 1.05;
-
+    const win = hit > 0.9 ? 1.5 : 1.05;
     const reward = bet * win;
 
     u.diamonds += reward;
@@ -261,7 +248,7 @@ bot.on("callback_query", async (q) => {
         message_id: messageId,
         reply_markup: {
           inline_keyboard: [
-            [{ text: "🎯 THROW AGAIN", callback_data: "darts" }],
+            [{ text: "🔁 THROW AGAIN", callback_data: "darts" }],
             [{ text: "⬅ BACK", callback_data: "casino" }]
           ]
         }
@@ -269,23 +256,22 @@ bot.on("callback_query", async (q) => {
     );
   }
 
-  // ================= 💳 DONATE SYSTEM (CARCASS) =================
+  // ================= DONATE =================
   if (q.data === "donate") {
     return bot.editMessageText(
-`💳 DONATE SYSTEM
+`💳 DONATE
 
-Способи:
-• Telegram Stars ⭐
-• CryptoBot ₿
-• Карта 💳 (майбутнє)
+⭐ Telegram Stars
+₿ CryptoBot
+💳 Card (soon)
 
-Після оплати ти отримуєш 💎`,
+Після оплати отримуєш 💎`,
       {
         chat_id: chatId,
         message_id: messageId,
         reply_markup: {
           inline_keyboard: [
-            [{ text: "⭐ STARS", url: "https://t.me/your_bot" }],
+            [{ text: "⭐ STARS", url: "https://t.me/PVEmpire1" }],
             [{ text: "₿ CRYPTOBOT", url: "https://t.me/CryptoBot" }],
             [{ text: "⬅ BACK", callback_data: "home" }]
           ]
@@ -293,20 +279,6 @@ bot.on("callback_query", async (q) => {
       }
     );
   }
-
-  // ================= PVP (placeholder) =================
-  if (q.data === "pvp") {
-    return bot.editMessageText(
-`⚔️ PVP
-
-(буде оновлено: PvP казино на 💎)`,
-      {
-        chat_id: chatId,
-        message_id: messageId,
-        ...mainMenu(u).options
-      }
-    );
-  }
 });
 
-console.log("🚀 FULL GAME + 💎 CASINO + DONATE RUNNING");YSTEM RUNNING");
+console.log("🚀 FULL BOT RUNNING CLEAN VERSION");
