@@ -24,7 +24,6 @@ async function getUser(chatId, username) {
       xp: 0,
       level: 1,
       lastFarm: 0,
-      lastWork: 0,
       lastCase: 0
     };
 
@@ -97,7 +96,7 @@ bot.on("callback_query", async (q) => {
     });
   }
 
-  // ===== FARM
+  // ===== FARM (є кулдаун)
   if (q.data === "farm") {
     const cd = 6 * 60 * 60 * 1000;
 
@@ -140,19 +139,8 @@ bot.on("callback_query", async (q) => {
     });
   }
 
-  // ===== WORK
+  // ===== WORK (БЕЗ КУЛДАУНА)
   if (q.data === "work") {
-    const cd = 3 * 60 * 60 * 1000;
-
-    if (u.lastWork && now - u.lastWork < cd) {
-      const h = Math.ceil((cd - (now - u.lastWork)) / 3600000);
-      return bot.editMessageText(`💼 cooldown ${h}h`, {
-        chat_id: chatId,
-        message_id: messageId,
-        ...menu()
-      });
-    }
-
     const reward =
       Math.random() < 0.7 ? 10 :
       Math.random() < 0.95 ? 25 : 50;
@@ -160,7 +148,6 @@ bot.on("callback_query", async (q) => {
     u.coins += reward;
     u.xp += 8;
     u.level = level(u.xp);
-    u.lastWork = now;
 
     await users.updateOne({ chatId }, { $set: u });
 
@@ -233,4 +220,4 @@ bot.on("callback_query", async (q) => {
   }
 });
 
-console.log("🚀 GAME WITHOUT TASKS READY");
+console.log("🚀 BOT RUNNING (WORK NO LIMIT)");
