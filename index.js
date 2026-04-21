@@ -12,9 +12,6 @@ await client.connect();
 const db = client.db("game");
 const users = db.collection("users");
 
-// ===== CONFIG =====
-const CHANNEL = "PVEmpire1";
-
 // ===== USER =====
 async function getUser(chatId, username) {
   let u = await users.findOne({ chatId });
@@ -29,17 +26,14 @@ async function getUser(chatId, username) {
       lastFarm: 0,
       lastWork: 0,
       lastCase: 0,
-      tasks: {
-        sub: false
-      }
+      tasks: {}
     };
 
     await users.insertOne(u);
   }
 
-  // FIX OLD USERS
   if (!u.tasks) {
-    u.tasks = { sub: false };
+    u.tasks = {};
     await users.updateOne({ chatId }, { $set: { tasks: u.tasks } });
   }
 
@@ -89,14 +83,14 @@ bot.on("callback_query", async (q) => {
 
   // ================= HOME
   if (q.data === "home") {
-    return bot.editMessageText("🏠 MAIN MENU", {
+    return bot.editMessageText("🏠 MENU", {
       chat_id: chatId,
       message_id: messageId,
       ...menu()
     });
   }
 
-  // ================= FARM TAB
+  // ================= FARM
   if (q.data === "tab_farm") {
     return bot.editMessageText("⛏ FARM", {
       chat_id: chatId,
@@ -110,13 +104,11 @@ bot.on("callback_query", async (q) => {
     });
   }
 
-  // ================= FARM
   if (q.data === "farm") {
     const cd = 6 * 60 * 60 * 1000;
 
-    if (u.lastFarm && now - u.lastFarm < cd) {
+    if (now - u.lastFarm < cd) {
       const h = Math.ceil((cd - (now - u.lastFarm)) / 3600000);
-
       return bot.editMessageText(`⛏ cooldown ${h}h`, {
         chat_id: chatId,
         message_id: messageId,
@@ -140,7 +132,7 @@ bot.on("callback_query", async (q) => {
     });
   }
 
-  // ================= WORK TAB
+  // ================= WORK
   if (q.data === "tab_work") {
     return bot.editMessageText("💼 WORK", {
       chat_id: chatId,
@@ -154,13 +146,11 @@ bot.on("callback_query", async (q) => {
     });
   }
 
-  // ================= WORK
   if (q.data === "work") {
     const cd = 3 * 60 * 60 * 1000;
 
-    if (u.lastWork && now - u.lastWork < cd) {
+    if (now - u.lastWork < cd) {
       const h = Math.ceil((cd - (now - u.lastWork)) / 3600000);
-
       return bot.editMessageText(`💼 cooldown ${h}h`, {
         chat_id: chatId,
         message_id: messageId,
@@ -186,7 +176,7 @@ bot.on("callback_query", async (q) => {
     });
   }
 
-  // ================= CASE TAB
+  // ================= CASE
   if (q.data === "tab_case") {
     return bot.editMessageText("📦 CASE", {
       chat_id: chatId,
@@ -200,13 +190,11 @@ bot.on("callback_query", async (q) => {
     });
   }
 
-  // ================= CASE
   if (q.data === "case") {
     const cd = 24 * 60 * 60 * 1000;
 
-    if (u.lastCase && now - u.lastCase < cd) {
+    if (now - u.lastCase < cd) {
       const h = Math.ceil((cd - (now - u.lastCase)) / 3600000);
-
       return bot.editMessageText(`📦 cooldown ${h}h`, {
         chat_id: chatId,
         message_id: messageId,
@@ -228,61 +216,62 @@ bot.on("callback_query", async (q) => {
     });
   }
 
-  // ================= TASKS (AUTO CHECK)
+  // ================= TASKS
   if (q.data === "tab_tasks") {
-    try {
-      const res = await bot.getChatMember("@PVEmpire1", chatId);
-
-      const isMember =
-        res.status === "member" ||
-        res.status === "administrator" ||
-        res.status === "creator";
-
-      if (isMember) {
-        if (!u.tasks.sub) {
-          u.tasks.sub = true;
-          u.coins += 25;
-          u.xp += 10;
-          u.level = level(u.xp);
-
-          await users.updateOne({ chatId }, { $set: u });
-        }
-
-        return bot.editMessageText(
+    return bot.editMessageText(
 `📜 TASKS
 
-1️⃣ Subscribe:
-👉 https://t.me/PVEmpire1
-
-Status: ${u.tasks.sub ? "✅ DONE (+25)" : "❌ NOT DONE"}`,
-          {
-            chat_id: chatId,
-            message_id: messageId,
-            ...menu()
-          }
-        );
+1️⃣ Visit site
+Reward: +20 coins`,
+      {
+        chat_id: chatId,
+        message_id: messageId,
+        reply_markup: {
+          inline_keyboard: [
+            [{ text: "🌐 GO", callback_data: "task_go_1" }],
+            [{ text: "✅ CHECK", callback_data: "task_check_1" }],
+            [{ text: "⬅ BACK", callback_data: "home" }]
+          ]
+        }
       }
+    );
+  }
 
-      return bot.editMessageText(
-`📜 TASKS
+  // ===== GO
+  if (q.data === "task_go_1") {
+    u.tasks.link1 = true;
+    await users.updateOne({ chatId }, { $set: u });
 
-1️⃣ Subscribe:
-👉 https://t.me/PVEmpire1
+    return bot.answerCallbackQuery(q.id, {
+      url: "https://example.com"
+    });
+  }
 
-Status: ❌ NOT DONE`,
-        {
-          chat_id: chatId,
-          message_id: messageId,
-          ...menu()
-        }
-      );
-
-    } catch (e) {
+  // ===== CHECK
+  if (q.data === "task_check_1") {
+    if (!u.tasks.link1) {
       return bot.answerCallbackQuery(q.id, {
-        text: "⚠️ Cannot check channel",
+        text: "❌ Click GO first",
         show_alert: true
       });
     }
+
+    if (u.tasks.link1 === "done") {
+      return bot.answerCallbackQuery(q.id, {
+        text: "Already done"
+      });
+    }
+
+    u.tasks.link1 = "done";
+    u.coins += 20;
+
+    await users.updateOne({ chatId }, { $set: u });
+
+    return bot.editMessageText("✅ +20 coins", {
+      chat_id: chatId,
+      message_id: messageId,
+      ...menu()
+    });
   }
 
   // ================= PROFILE
@@ -306,4 +295,4 @@ Status: ❌ NOT DONE`,
   }
 });
 
-console.log("🚀 FULL GAME RUNNING");
+console.log("🚀 GAME READY");
