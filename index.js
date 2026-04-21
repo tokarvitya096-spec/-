@@ -20,7 +20,7 @@ async function getUser(chatId, username) {
     u = {
       chatId,
       username: username || "player",
-      coins: 0,
+      coins: 100,
       xp: 0,
       level: 1,
       lastFarm: 0,
@@ -47,7 +47,8 @@ function menu() {
           { text: "💼 WORK", callback_data: "tab_work" }
         ],
         [
-          { text: "📦 CASE", callback_data: "tab_case" }
+          { text: "📦 CASE", callback_data: "tab_case" },
+          { text: "🎰 CASINO", callback_data: "tab_casino" }
         ],
         [
           { text: "👤 PROFILE", callback_data: "tab_profile" }
@@ -73,7 +74,7 @@ bot.on("callback_query", async (q) => {
 
   bot.answerCallbackQuery(q.id).catch(() => {});
 
-  // ===== HOME
+  // ================= HOME
   if (q.data === "home") {
     return bot.editMessageText("🏠 MENU", {
       chat_id: chatId,
@@ -82,7 +83,7 @@ bot.on("callback_query", async (q) => {
     });
   }
 
-  // ===== FARM TAB
+  // ================= FARM
   if (q.data === "tab_farm") {
     return bot.editMessageText("⛏ FARM", {
       chat_id: chatId,
@@ -96,19 +97,7 @@ bot.on("callback_query", async (q) => {
     });
   }
 
-  // ===== FARM (є кулдаун)
   if (q.data === "farm") {
-    const cd = 6 * 60 * 60 * 1000;
-
-    if (u.lastFarm && now - u.lastFarm < cd) {
-      const h = Math.ceil((cd - (now - u.lastFarm)) / 3600000);
-      return bot.editMessageText(`⛏ cooldown ${h}h`, {
-        chat_id: chatId,
-        message_id: messageId,
-        ...menu()
-      });
-    }
-
     const gain = Math.floor(Math.random() * 10) + 5;
 
     u.coins += gain;
@@ -125,7 +114,7 @@ bot.on("callback_query", async (q) => {
     });
   }
 
-  // ===== WORK TAB
+  // ================= WORK
   if (q.data === "tab_work") {
     return bot.editMessageText("💼 WORK", {
       chat_id: chatId,
@@ -139,7 +128,6 @@ bot.on("callback_query", async (q) => {
     });
   }
 
-  // ===== WORK (БЕЗ КУЛДАУНА)
   if (q.data === "work") {
     const reward =
       Math.random() < 0.7 ? 10 :
@@ -158,7 +146,7 @@ bot.on("callback_query", async (q) => {
     });
   }
 
-  // ===== CASE TAB
+  // ================= CASE
   if (q.data === "tab_case") {
     return bot.editMessageText("📦 CASE", {
       chat_id: chatId,
@@ -172,19 +160,7 @@ bot.on("callback_query", async (q) => {
     });
   }
 
-  // ===== CASE
   if (q.data === "case") {
-    const cd = 24 * 60 * 60 * 1000;
-
-    if (u.lastCase && now - u.lastCase < cd) {
-      const h = Math.ceil((cd - (now - u.lastCase)) / 3600000);
-      return bot.editMessageText(`📦 cooldown ${h}h`, {
-        chat_id: chatId,
-        message_id: messageId,
-        ...menu()
-      });
-    }
-
     const reward = Math.random() < 0.7 ? 15 : 40;
 
     u.coins += reward;
@@ -199,7 +175,91 @@ bot.on("callback_query", async (q) => {
     });
   }
 
-  // ===== PROFILE
+  // ================= CASINO TAB
+  if (q.data === "tab_casino") {
+    return bot.editMessageText("🎰 CASINO", {
+      chat_id: chatId,
+      message_id: messageId,
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: "🎲 COINFLIP", callback_data: "coinflip" }],
+          [{ text: "🎰 SLOTS", callback_data: "slots" }],
+          [{ text: "⬅ BACK", callback_data: "home" }]
+        ]
+      }
+    });
+  }
+
+  // ================= COINFLIP
+  if (q.data === "coinflip") {
+    const bet = 10;
+
+    if (u.coins < bet) {
+      return bot.answerCallbackQuery(q.id, {
+        text: "❌ Not enough coins",
+        show_alert: true
+      });
+    }
+
+    const win = Math.random() < 0.5;
+
+    if (win) {
+      u.coins += bet;
+    } else {
+      u.coins -= bet;
+    }
+
+    await users.updateOne({ chatId }, { $set: u });
+
+    return bot.editMessageText(
+win ? "🎉 WIN +10" : "💀 LOSE -10",
+      {
+        chat_id: chatId,
+        message_id: messageId,
+        ...menu()
+      }
+    );
+  }
+
+  // ================= SLOTS
+  if (q.data === "slots") {
+    const bet = 20;
+
+    if (u.coins < bet) {
+      return bot.answerCallbackQuery(q.id, {
+        text: "❌ Not enough coins",
+        show_alert: true
+      });
+    }
+
+    const symbols = ["🍒", "🍋", "💎", "7️⃣"];
+    const r1 = symbols[Math.floor(Math.random() * symbols.length)];
+    const r2 = symbols[Math.floor(Math.random() * symbols.length)];
+    const r3 = symbols[Math.floor(Math.random() * symbols.length)];
+
+    let text = `🎰 ${r1} | ${r2} | ${r3}\n\n`;
+
+    if (r1 === r2 && r2 === r3) {
+      u.coins += bet * 5;
+      text += "💎 JACKPOT x5";
+    } else if (r1 === r2 || r2 === r3 || r1 === r3) {
+      u.coins += bet * 2;
+      text += "🎉 WIN x2";
+    } else {
+      u.coins -= bet;
+      text += "💀 LOSE";
+    }
+
+    await users.updateOne({ chatId }, { $set: u });
+
+    return bot.editMessageText(text, {
+      chat_id: chatId,
+      message_id: messageId,
+      ...menu()
+    });
+  }
+
+  // ================= PROFILE
   if (q.data === "tab_profile") {
     return bot.editMessageText(
 `👤 PROFILE
@@ -220,4 +280,4 @@ bot.on("callback_query", async (q) => {
   }
 });
 
-console.log("🚀 BOT RUNNING (WORK NO LIMIT)");
+console.log("🚀 GAME WITH CASINO TAB RUNNING");
