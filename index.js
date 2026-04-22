@@ -11,25 +11,17 @@ await client.connect();
 
 const db = client.db("game");
 const users = db.collection("users");
-
-const pending = new Map();
-const approved = new Set();
+const payments = db.collection("payments"); // 🔥 НОВЕ
 
 // ================= USER =================
 async function getUser(chatId, username) {
   let u = await users.findOne({ chatId });
 
   if (!u) {
-    u = {
-      chatId,
-      username: username || "player",
-      coins: 100,
-      diamonds: 0
-    };
+    u = { chatId, username: username || "player", coins: 100, diamonds: 0 };
     await users.insertOne(u);
   }
 
-  // FIX NaN
   if (typeof u.coins !== "number") u.coins = 0;
   if (typeof u.diamonds !== "number") u.diamonds = 0;
 
@@ -91,61 +83,46 @@ bot.on("message", async (msg) => {
 
   const u = await getUser(chatId, msg.from.username);
 
-  // BACK
-  if (text === "⬅ BACK") {
-    return bot.sendMessage(chatId, "🔙 Назад", mainMenu());
-  }
+  if (text === "⬅ BACK") return bot.sendMessage(chatId, "🔙", mainMenu());
 
-  // ================= COINS =================
-  if (text === "🪙 Coins") {
-    return bot.sendMessage(chatId, "🪙 Coins Menu", coinsMenu());
-  }
+  // COINS
+  if (text === "🪙 Coins") return bot.sendMessage(chatId, "🪙 Menu", coinsMenu());
 
   if (text === "⛏ FARM") {
-    u.coins = Number(u.coins) + 10;
+    u.coins += 10;
     await users.updateOne({ chatId }, { $set: u });
-    return bot.sendMessage(chatId, "+10 coins", coinsMenu());
+    return bot.sendMessage(chatId, "+10", coinsMenu());
   }
 
   if (text === "💼 WORK") {
-    u.coins = Number(u.coins) + 20;
+    u.coins += 20;
     await users.updateOne({ chatId }, { $set: u });
-    return bot.sendMessage(chatId, "+20 coins", coinsMenu());
+    return bot.sendMessage(chatId, "+20", coinsMenu());
   }
 
   if (text === "📦 CASE") {
     const r = Math.random() < 0.7 ? 15 : 40;
-    u.coins = Number(u.coins) + r;
+    u.coins += r;
     await users.updateOne({ chatId }, { $set: u });
-    return bot.sendMessage(chatId, `+${r} coins`, coinsMenu());
+    return bot.sendMessage(chatId, `+${r}`, coinsMenu());
   }
 
-  // ================= PROFILE =================
+  // PROFILE
   if (text === "👤 Profile") {
-    const coins = Number(u.coins) || 0;
-    const diamonds = Number(u.diamonds) || 0;
-
-    return bot.sendMessage(
-      chatId,
+    return bot.sendMessage(chatId,
 `👤 PROFILE
 
-🆔 ${chatId}
-👤 @${msg.from.username || "none"}
-
-💰 Coins: ${coins}
-💎 Diamonds: ${diamonds}`,
+💰 ${u.coins}
+💎 ${u.diamonds}`,
       mainMenu()
     );
   }
 
-  // ================= CASINO =================
+  // CASINO
   if (text === "🎰 Casino") {
-    if ((Number(u.diamonds) || 0) <= 0) {
-      return bot.sendMessage(chatId, "❌ 0💎", mainMenu());
-    }
+    if (u.diamonds <= 0) return bot.sendMessage(chatId, "❌ 0💎", mainMenu());
 
-    return bot.sendMessage(
-      chatId,
+    return bot.sendMessage(chatId,
 `🎰 CASINO
 
 🎲 /dice
@@ -156,42 +133,41 @@ bot.on("message", async (msg) => {
 
   // ================= DONATE =================
   if (text === "💳 Donate") {
-    return bot.sendMessage(chatId, "💳 Вибери банк:", bankMenu());
+    return bot.sendMessage(chatId, "💳 Обери банк:", bankMenu());
   }
 
   if (text === "Abank" || text === "Pumb") {
-    const card =
-      text === "Abank"
+    await payments.insertOne({
+      chatId,
+      card: text === "Abank"
         ? "4400005550111519"
-        : "5355280028902177";
+        : "5355280028902177",
+      amount: 0,
+      status: "waiting_amount"
+    });
 
-    pending.set(chatId, { card, step: "amount" });
-
-    return bot.sendMessage(chatId, "💎 Напиши скільки хочеш", bankMenu());
+    return bot.sendMessage(chatId, "💎 Введи кількість", bankMenu());
   }
 
   const amount = Number(text);
 
   if (!isNaN(amount)) {
-    const data = pending.get(chatId);
-    if (!data || data.step !== "amount") return;
+    const pay = await payments.findOne({ chatId, status: "waiting_amount" });
 
-    if (amount < 3) {
-      return bot.sendMessage(chatId, "❌ мін 3💎", bankMenu());
-    }
+    if (!pay) return;
 
-    const price = amount;
+    if (amount < 3) return bot.sendMessage(chatId, "❌ мін 3💎");
 
-    data.amount = amount;
-    data.step = "pay";
-    pending.set(chatId, data);
+    await payments.updateOne(
+      { _id: pay._id },
+      { $set: { amount, status: "waiting_photo" } }
+    );
 
-    return bot.sendMessage(
-      chatId,
+    return bot.sendMessage(chatId,
 `💳 Карта:
-${data.card}
+${pay.card}
 
-💰 До оплати: ${price}₴
+💰 До оплати: ${amount}₴
 
 📩 Надішли квитанцію`,
       mainMenu()
@@ -199,57 +175,44 @@ ${data.card}
   }
 });
 
-// ================= 🎲 DICE =================
+// ================= 🎲 =================
 bot.onText(/\/dice/, async (msg) => {
-  const chatId = msg.chat.id;
-  const u = await getUser(chatId, msg.from.username);
+  const u = await getUser(msg.chat.id);
 
-  if ((Number(u.diamonds) || 0) <= 0) {
-    return bot.sendMessage(chatId, "❌ 0💎", mainMenu());
-  }
+  if (u.diamonds <= 0) return;
 
-  bot.sendDice(chatId).then(async (m) => {
+  bot.sendDice(msg.chat.id).then(async (m) => {
     const v = m.dice.value;
 
-    let reward =
-      v === 1 ? 1.1 :
-      v === 2 ? 1.2 :
-      v === 3 ? 1.4 :
-      v === 4 ? 1.6 :
-      v === 5 ? 1.8 : 2;
+    const reward = [1.1,1.2,1.4,1.6,1.8,2][v-1];
 
-    u.diamonds = Number(u.diamonds) + Number(reward);
+    await users.updateOne(
+      { chatId: msg.chat.id },
+      { $inc: { diamonds: reward } }
+    );
 
-    await users.updateOne({ chatId }, { $set: u });
-
-    bot.sendMessage(chatId, `🎲 ${v} → +${reward}💎`, mainMenu());
+    bot.sendMessage(msg.chat.id, `🎲 ${v} → +${reward}💎`);
   });
 });
 
-// ================= 🎯 DART =================
+// ================= 🎯 =================
 bot.onText(/\/dart/, async (msg) => {
-  const chatId = msg.chat.id;
-  const u = await getUser(chatId, msg.from.username);
+  const u = await getUser(msg.chat.id);
 
-  if ((Number(u.diamonds) || 0) <= 0) {
-    return bot.sendMessage(chatId, "❌ 0💎", mainMenu());
-  }
+  if (u.diamonds <= 0) return;
 
-  bot.sendDice(chatId, { emoji: "🎯" }).then(async (m) => {
+  bot.sendDice(msg.chat.id, { emoji: "🎯" }).then(async (m) => {
     const v = m.dice.value;
-
     const reward = v === 6 ? 1.5 : 1.05;
 
-    u.diamonds = Number(u.diamonds) + Number(reward);
-
-    await users.updateOne({ chatId }, { $set: u });
-
-    bot.sendMessage(
-      chatId,
-`🎯 ${v === 6 ? "CENTER" : "MISS"}
-+${reward}💎`,
-      mainMenu()
+    await users.updateOne(
+      { chatId: msg.chat.id },
+      { $inc: { diamonds: reward } }
     );
+
+    bot.sendMessage(msg.chat.id,
+`🎯 ${v === 6 ? "CENTER" : "MISS"}
++${reward}💎`);
   });
 });
 
@@ -258,19 +221,30 @@ bot.on("photo", async (msg) => {
   const chatId = msg.chat.id;
   const ADMIN_ID = process.env.ADMIN_ID;
 
-  const data = pending.get(chatId);
+  const pay = await payments.findOne({
+    chatId,
+    status: "waiting_photo"
+  });
+
+  if (!pay) return bot.sendMessage(chatId, "❌ Немає активного донату");
+
+  await payments.updateOne(
+    { _id: pay._id },
+    { $set: { status: "pending" } }
+  );
 
   bot.sendPhoto(ADMIN_ID, msg.photo.at(-1).file_id, {
     caption:
 `💳 DONATE
 
+ID: ${pay._id}
 User: ${chatId}
-💎: ${data?.amount || 0}`,
+💎: ${pay.amount}`,
     reply_markup: {
       inline_keyboard: [
         [
-          { text: "✅", callback_data: `approve_${chatId}` },
-          { text: "❌", callback_data: `reject_${chatId}` }
+          { text: "✅", callback_data: `approve_${pay._id}` },
+          { text: "❌", callback_data: `reject_${pay._id}` }
         ]
       ]
     }
@@ -283,30 +257,38 @@ User: ${chatId}
 bot.on("callback_query", async (q) => {
   if (!q.data.startsWith("approve_") && !q.data.startsWith("reject_")) return;
 
-  const id = Number(q.data.split("_")[1]);
+  const id = q.data.split("_")[1];
 
-  if (approved.has(id)) {
-    return bot.answerCallbackQuery(q.id, { text: "Вже було" });
+  const pay = await payments.findOne({ _id: new MongoClient.ObjectId(id) });
+
+  if (!pay || pay.status !== "pending") {
+    return bot.answerCallbackQuery(q.id, { text: "❌ вже оброблено" });
   }
 
-  approved.add(id);
-
   if (q.data.startsWith("approve_")) {
-    const amount = Number(pending.get(id)?.amount || 0);
-
     await users.updateOne(
-      { chatId: id },
-      { $inc: { diamonds: amount } }
+      { chatId: pay.chatId },
+      { $inc: { diamonds: pay.amount } }
     );
 
-    bot.sendMessage(id, `✅ +${amount}💎`);
+    await payments.updateOne(
+      { _id: pay._id },
+      { $set: { status: "approved" } }
+    );
+
+    bot.sendMessage(pay.chatId, `✅ +${pay.amount}💎`);
   }
 
   if (q.data.startsWith("reject_")) {
-    bot.sendMessage(id, "❌ відхилено");
+    await payments.updateOne(
+      { _id: pay._id },
+      { $set: { status: "rejected" } }
+    );
+
+    bot.sendMessage(pay.chatId, "❌ відхилено");
   }
 
   bot.answerCallbackQuery(q.id);
 });
 
-console.log("🚀 GAME FIXED (NO NaN)");
+console.log("🚀 DONATE 100% FIXED");
