@@ -22,13 +22,17 @@ async function getUser(chatId, username) {
       chatId,
       username: username || "player",
       coins: 100,
-      diamonds: 0
+      diamonds: 0,
+      lastWork: 0,
+      lastCase: 0
     };
     await users.insertOne(u);
   }
 
   if (typeof u.coins !== "number") u.coins = 0;
   if (typeof u.diamonds !== "number") u.diamonds = 0;
+  if (typeof u.lastWork !== "number") u.lastWork = 0;
+  if (typeof u.lastCase !== "number") u.lastCase = 0;
 
   return u;
 }
@@ -99,16 +103,41 @@ bot.on("message", async (msg) => {
     return bot.sendMessage(chatId, "+10", coinsMenu());
   }
 
+  // ================= WORK (1 hour cooldown) =================
   if (text === "💼 WORK") {
+    const now = Date.now();
+    const cd = 60 * 60 * 1000;
+
+    if (now - u.lastWork < cd) {
+      const left = Math.ceil((cd - (now - u.lastWork)) / 60000);
+      return bot.sendMessage(chatId, `⏳ ще ${left} хв`, coinsMenu());
+    }
+
     u.coins += 20;
+    u.lastWork = now;
+
     await users.updateOne({ chatId }, { $set: u });
-    return bot.sendMessage(chatId, "+20", coinsMenu());
+
+    return bot.sendMessage(chatId, "+20 coins", coinsMenu());
   }
 
+  // ================= CASE (6 hour cooldown) =================
   if (text === "📦 CASE") {
+    const now = Date.now();
+    const cd = 6 * 60 * 60 * 1000;
+
+    if (now - u.lastCase < cd) {
+      const left = Math.ceil((cd - (now - u.lastCase)) / 60000);
+      return bot.sendMessage(chatId, `⏳ ще ${left} хв`, coinsMenu());
+    }
+
     const r = Math.random() < 0.7 ? 15 : 40;
+
     u.coins += r;
+    u.lastCase = now;
+
     await users.updateOne({ chatId }, { $set: u });
+
     return bot.sendMessage(chatId, `+${r}`, coinsMenu());
   }
 
@@ -125,9 +154,7 @@ bot.on("message", async (msg) => {
 
   // ================= CASINO =================
   if (text === "🎰 Casino") {
-    if (u.diamonds <= 0) {
-      return bot.sendMessage(chatId, "❌ 0💎", mainMenu());
-    }
+    if (u.diamonds <= 0) return bot.sendMessage(chatId, "❌ 0💎", mainMenu());
 
     return bot.sendMessage(chatId,
 `🎰 CASINO
@@ -301,10 +328,6 @@ bot.onText(/\/balances/, async (msg) => {
 
   const list = await users.find({}).limit(50).toArray();
 
-  if (!list.length) {
-    return bot.sendMessage(chatId, "Empty DB");
-  }
-
   let text = "📊 ALL BALANCES\n\n";
 
   for (const u of list) {
@@ -314,4 +337,4 @@ bot.onText(/\/balances/, async (msg) => {
   bot.sendMessage(chatId, text);
 });
 
-console.log("🚀 FULL GAME + ADMIN READY");
+console.log("🚀 FULL GAME WITH COOLDOWN READY");
