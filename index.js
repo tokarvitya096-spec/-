@@ -29,6 +29,10 @@ async function getUser(chatId, username) {
     await users.insertOne(u);
   }
 
+  // FIX NaN
+  if (typeof u.coins !== "number") u.coins = 0;
+  if (typeof u.diamonds !== "number") u.diamonds = 0;
+
   return u;
 }
 
@@ -98,26 +102,29 @@ bot.on("message", async (msg) => {
   }
 
   if (text === "⛏ FARM") {
-    u.coins += 10;
+    u.coins = Number(u.coins) + 10;
     await users.updateOne({ chatId }, { $set: u });
     return bot.sendMessage(chatId, "+10 coins", coinsMenu());
   }
 
   if (text === "💼 WORK") {
-    u.coins += 20;
+    u.coins = Number(u.coins) + 20;
     await users.updateOne({ chatId }, { $set: u });
     return bot.sendMessage(chatId, "+20 coins", coinsMenu());
   }
 
   if (text === "📦 CASE") {
     const r = Math.random() < 0.7 ? 15 : 40;
-    u.coins += r;
+    u.coins = Number(u.coins) + r;
     await users.updateOne({ chatId }, { $set: u });
     return bot.sendMessage(chatId, `+${r} coins`, coinsMenu());
   }
 
   // ================= PROFILE =================
   if (text === "👤 Profile") {
+    const coins = Number(u.coins) || 0;
+    const diamonds = Number(u.diamonds) || 0;
+
     return bot.sendMessage(
       chatId,
 `👤 PROFILE
@@ -125,15 +132,15 @@ bot.on("message", async (msg) => {
 🆔 ${chatId}
 👤 @${msg.from.username || "none"}
 
-💰 Coins: ${u.coins}
-💎 Diamonds: ${u.diamonds}`,
+💰 Coins: ${coins}
+💎 Diamonds: ${diamonds}`,
       mainMenu()
     );
   }
 
   // ================= CASINO =================
   if (text === "🎰 Casino") {
-    if (u.diamonds <= 0) {
+    if ((Number(u.diamonds) || 0) <= 0) {
       return bot.sendMessage(chatId, "❌ 0💎", mainMenu());
     }
 
@@ -163,7 +170,7 @@ bot.on("message", async (msg) => {
     return bot.sendMessage(chatId, "💎 Напиши скільки хочеш", bankMenu());
   }
 
-  const amount = parseInt(text);
+  const amount = Number(text);
 
   if (!isNaN(amount)) {
     const data = pending.get(chatId);
@@ -181,14 +188,12 @@ bot.on("message", async (msg) => {
 
     return bot.sendMessage(
       chatId,
-`💳 Оплата
-
-Карта:
+`💳 Карта:
 ${data.card}
 
 💰 До оплати: ${price}₴
 
-📩 Після оплати надішли квитанцію`,
+📩 Надішли квитанцію`,
       mainMenu()
     );
   }
@@ -199,7 +204,7 @@ bot.onText(/\/dice/, async (msg) => {
   const chatId = msg.chat.id;
   const u = await getUser(chatId, msg.from.username);
 
-  if (u.diamonds <= 0) {
+  if ((Number(u.diamonds) || 0) <= 0) {
     return bot.sendMessage(chatId, "❌ 0💎", mainMenu());
   }
 
@@ -213,19 +218,20 @@ bot.onText(/\/dice/, async (msg) => {
       v === 4 ? 1.6 :
       v === 5 ? 1.8 : 2;
 
-    u.diamonds += reward;
+    u.diamonds = Number(u.diamonds) + Number(reward);
+
     await users.updateOne({ chatId }, { $set: u });
 
     bot.sendMessage(chatId, `🎲 ${v} → +${reward}💎`, mainMenu());
   });
 });
 
-// ================= 🎯 DART (STICKER) =================
+// ================= 🎯 DART =================
 bot.onText(/\/dart/, async (msg) => {
   const chatId = msg.chat.id;
   const u = await getUser(chatId, msg.from.username);
 
-  if (u.diamonds <= 0) {
+  if ((Number(u.diamonds) || 0) <= 0) {
     return bot.sendMessage(chatId, "❌ 0💎", mainMenu());
   }
 
@@ -234,13 +240,13 @@ bot.onText(/\/dart/, async (msg) => {
 
     const reward = v === 6 ? 1.5 : 1.05;
 
-    u.diamonds += reward;
+    u.diamonds = Number(u.diamonds) + Number(reward);
+
     await users.updateOne({ chatId }, { $set: u });
 
     bot.sendMessage(
       chatId,
-`🎯 Випало: ${v}
-${v === 6 ? "🎯 CENTER!" : "MISS"}
+`🎯 ${v === 6 ? "CENTER" : "MISS"}
 +${reward}💎`,
       mainMenu()
     );
@@ -280,13 +286,13 @@ bot.on("callback_query", async (q) => {
   const id = Number(q.data.split("_")[1]);
 
   if (approved.has(id)) {
-    return bot.answerCallbackQuery(q.id, { text: "Вже оброблено" });
+    return bot.answerCallbackQuery(q.id, { text: "Вже було" });
   }
 
   approved.add(id);
 
   if (q.data.startsWith("approve_")) {
-    const amount = pending.get(id)?.amount || 0;
+    const amount = Number(pending.get(id)?.amount || 0);
 
     await users.updateOne(
       { chatId: id },
@@ -303,4 +309,4 @@ bot.on("callback_query", async (q) => {
   bot.answerCallbackQuery(q.id);
 });
 
-console.log("🚀 FULL GAME READY");
+console.log("🚀 GAME FIXED (NO NaN)");
