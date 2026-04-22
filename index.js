@@ -254,7 +254,7 @@ bot.on("photo", async (msg) => {
   bot.sendMessage(chatId, "📩 sent");
 });
 
-// ================= FAST ADMIN =================
+// ================= ADMIN CALLBACK =================
 bot.on("callback_query", async (q) => {
   const data = q.data;
 
@@ -262,7 +262,6 @@ bot.on("callback_query", async (q) => {
 
   const id = data.split("_")[1];
 
-  // ⚡ швидка відповідь (ВАЖЛИВО)
   bot.answerCallbackQuery(q.id, { text: "OK" });
 
   const pay = await payments.findOne({ _id: new ObjectId(id) });
@@ -292,4 +291,27 @@ bot.on("callback_query", async (q) => {
   }
 });
 
-console.log("🚀 FAST SYSTEM RUNNING");
+// ================= ADMIN BALANCES =================
+bot.onText(/\/balances/, async (msg) => {
+  const chatId = msg.chat.id;
+
+  if (String(chatId) !== String(process.env.ADMIN_ID)) {
+    return bot.sendMessage(chatId, "❌ no access");
+  }
+
+  const list = await users.find({}).limit(50).toArray();
+
+  if (!list.length) {
+    return bot.sendMessage(chatId, "Empty DB");
+  }
+
+  let text = "📊 ALL BALANCES\n\n";
+
+  for (const u of list) {
+    text += `👤 ${u.username || u.chatId}\n💰 ${u.coins || 0} | 💎 ${u.diamonds || 0}\n\n`;
+  }
+
+  bot.sendMessage(chatId, text);
+});
+
+console.log("🚀 FULL GAME + ADMIN READY");
