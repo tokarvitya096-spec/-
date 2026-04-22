@@ -1,6 +1,6 @@
 import dotenv from "dotenv";
 import TelegramBot from "node-telegram-bot-api";
-import { MongoClient } from "mongodb";
+import { MongoClient, ObjectId } from "mongodb";
 
 dotenv.config();
 
@@ -11,14 +11,19 @@ await client.connect();
 
 const db = client.db("game");
 const users = db.collection("users");
-const payments = db.collection("payments"); // 🔥 НОВЕ
+const payments = db.collection("payments");
 
 // ================= USER =================
 async function getUser(chatId, username) {
   let u = await users.findOne({ chatId });
 
   if (!u) {
-    u = { chatId, username: username || "player", coins: 100, diamonds: 0 };
+    u = {
+      chatId,
+      username: username || "player",
+      coins: 100,
+      diamonds: 0
+    };
     await users.insertOne(u);
   }
 
@@ -85,7 +90,7 @@ bot.on("message", async (msg) => {
 
   if (text === "⬅ BACK") return bot.sendMessage(chatId, "🔙", mainMenu());
 
-  // COINS
+  // ================= COINS =================
   if (text === "🪙 Coins") return bot.sendMessage(chatId, "🪙 Menu", coinsMenu());
 
   if (text === "⛏ FARM") {
@@ -107,20 +112,22 @@ bot.on("message", async (msg) => {
     return bot.sendMessage(chatId, `+${r}`, coinsMenu());
   }
 
-  // PROFILE
+  // ================= PROFILE =================
   if (text === "👤 Profile") {
     return bot.sendMessage(chatId,
 `👤 PROFILE
 
-💰 ${u.coins}
-💎 ${u.diamonds}`,
+💰 Coins: ${u.coins}
+💎 Diamonds: ${u.diamonds}`,
       mainMenu()
     );
   }
 
-  // CASINO
+  // ================= CASINO =================
   if (text === "🎰 Casino") {
-    if (u.diamonds <= 0) return bot.sendMessage(chatId, "❌ 0💎", mainMenu());
+    if (u.diamonds <= 0) {
+      return bot.sendMessage(chatId, "❌ 0💎", mainMenu());
+    }
 
     return bot.sendMessage(chatId,
 `🎰 CASINO
@@ -133,49 +140,51 @@ bot.on("message", async (msg) => {
 
   // ================= DONATE =================
   if (text === "💳 Donate") {
-    return bot.sendMessage(chatId, "💳 Обери банк:", bankMenu());
+    return bot.sendMessage(chatId, "💳 Bank:", bankMenu());
   }
 
   if (text === "Abank" || text === "Pumb") {
+    const card =
+      text === "Abank"
+        ? "4400005550111519"
+        : "5355280028902177";
+
     await payments.insertOne({
       chatId,
-      card: text === "Abank"
-        ? "4400005550111519"
-        : "5355280028902177",
+      card,
       amount: 0,
-      status: "waiting_amount"
+      status: "amount"
     });
 
-    return bot.sendMessage(chatId, "💎 Введи кількість", bankMenu());
+    return bot.sendMessage(chatId, "💎 Enter amount", bankMenu());
   }
 
   const amount = Number(text);
 
   if (!isNaN(amount)) {
-    const pay = await payments.findOne({ chatId, status: "waiting_amount" });
-
+    const pay = await payments.findOne({ chatId, status: "amount" });
     if (!pay) return;
 
-    if (amount < 3) return bot.sendMessage(chatId, "❌ мін 3💎");
+    if (amount < 3) return bot.sendMessage(chatId, "❌ min 3💎");
 
     await payments.updateOne(
       { _id: pay._id },
-      { $set: { amount, status: "waiting_photo" } }
+      { $set: { amount, status: "photo" } }
     );
 
     return bot.sendMessage(chatId,
-`💳 Карта:
+`💳 Card:
 ${pay.card}
 
-💰 До оплати: ${amount}₴
+💰 Pay: ${amount}₴
 
-📩 Надішли квитанцію`,
+📩 Send receipt`,
       mainMenu()
     );
   }
 });
 
-// ================= 🎲 =================
+// ================= DICE =================
 bot.onText(/\/dice/, async (msg) => {
   const u = await getUser(msg.chat.id);
 
@@ -195,7 +204,7 @@ bot.onText(/\/dice/, async (msg) => {
   });
 });
 
-// ================= 🎯 =================
+// ================= DART =================
 bot.onText(/\/dart/, async (msg) => {
   const u = await getUser(msg.chat.id);
 
@@ -203,6 +212,7 @@ bot.onText(/\/dart/, async (msg) => {
 
   bot.sendDice(msg.chat.id, { emoji: "🎯" }).then(async (m) => {
     const v = m.dice.value;
+
     const reward = v === 6 ? 1.5 : 1.05;
 
     await users.updateOne(
@@ -221,12 +231,8 @@ bot.on("photo", async (msg) => {
   const chatId = msg.chat.id;
   const ADMIN_ID = process.env.ADMIN_ID;
 
-  const pay = await payments.findOne({
-    chatId,
-    status: "waiting_photo"
-  });
-
-  if (!pay) return bot.sendMessage(chatId, "❌ Немає активного донату");
+  const pay = await payments.findOne({ chatId, status: "photo" });
+  if (!pay) return;
 
   await payments.updateOne(
     { _id: pay._id },
@@ -234,12 +240,7 @@ bot.on("photo", async (msg) => {
   );
 
   bot.sendPhoto(ADMIN_ID, msg.photo.at(-1).file_id, {
-    caption:
-`💳 DONATE
-
-ID: ${pay._id}
-User: ${chatId}
-💎: ${pay.amount}`,
+    caption: `💳 ${pay.amount}💎`,
     reply_markup: {
       inline_keyboard: [
         [
@@ -250,22 +251,24 @@ User: ${chatId}
     }
   });
 
-  bot.sendMessage(chatId, "📩 на перевірці");
+  bot.sendMessage(chatId, "📩 sent");
 });
 
-// ================= ADMIN =================
+// ================= FAST ADMIN =================
 bot.on("callback_query", async (q) => {
-  if (!q.data.startsWith("approve_") && !q.data.startsWith("reject_")) return;
+  const data = q.data;
 
-  const id = q.data.split("_")[1];
+  if (!data.startsWith("approve_") && !data.startsWith("reject_")) return;
 
-  const pay = await payments.findOne({ _id: new MongoClient.ObjectId(id) });
+  const id = data.split("_")[1];
 
-  if (!pay || pay.status !== "pending") {
-    return bot.answerCallbackQuery(q.id, { text: "❌ вже оброблено" });
-  }
+  // ⚡ швидка відповідь (ВАЖЛИВО)
+  bot.answerCallbackQuery(q.id, { text: "OK" });
 
-  if (q.data.startsWith("approve_")) {
+  const pay = await payments.findOne({ _id: new ObjectId(id) });
+  if (!pay || pay.status !== "pending") return;
+
+  if (data.startsWith("approve_")) {
     await users.updateOne(
       { chatId: pay.chatId },
       { $inc: { diamonds: pay.amount } }
@@ -279,16 +282,14 @@ bot.on("callback_query", async (q) => {
     bot.sendMessage(pay.chatId, `✅ +${pay.amount}💎`);
   }
 
-  if (q.data.startsWith("reject_")) {
+  if (data.startsWith("reject_")) {
     await payments.updateOne(
       { _id: pay._id },
       { $set: { status: "rejected" } }
     );
 
-    bot.sendMessage(pay.chatId, "❌ відхилено");
+    bot.sendMessage(pay.chatId, "❌ rejected");
   }
-
-  bot.answerCallbackQuery(q.id);
 });
 
-console.log("🚀 DONATE 100% FIXED");
+console.log("🚀 FAST SYSTEM RUNNING");
