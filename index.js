@@ -32,8 +32,8 @@ async function getUser(chatId, username) {
   return u;
 }
 
-// ================= BOTTOM MENU =================
-function menu() {
+// ================= MAIN MENU =================
+function mainMenu() {
   return {
     reply_markup: {
       keyboard: [
@@ -46,18 +46,27 @@ function menu() {
   };
 }
 
+// ================= BANK MENU =================
+function bankMenu() {
+  return {
+    reply_markup: {
+      keyboard: [
+        ["Abank", "Pumb"],
+        ["⬅ BACK"]
+      ],
+      resize_keyboard: true
+    }
+  };
+}
+
 // ================= START =================
 bot.onText(/\/start/, async (msg) => {
   const u = await getUser(msg.chat.id, msg.from.username);
 
-  bot.sendMessage(
-    msg.chat.id,
-    `🎮 GAME HUB\n💎 ${u.diamonds}`,
-    menu()
-  );
+  bot.sendMessage(msg.chat.id, `🎮 GAME\n💎 ${u.diamonds}`, mainMenu());
 });
 
-// ================= BUTTON HANDLER =================
+// ================= MAIN HANDLER =================
 bot.on("message", async (msg) => {
   if (!msg.text) return;
 
@@ -68,124 +77,109 @@ bot.on("message", async (msg) => {
 
   const u = await getUser(chatId, msg.from.username);
 
+  // BACK
+  if (text === "⬅ BACK") {
+    return bot.sendMessage(chatId, "🔙 Назад", mainMenu());
+  }
+
   // FARM
   if (text === "⛏ FARM") {
     u.coins += 10;
     await users.updateOne({ chatId }, { $set: u });
-
-    return bot.sendMessage(chatId, "⛏ +10 coins", menu());
+    return bot.sendMessage(chatId, "+10 coins", mainMenu());
   }
 
   // WORK
   if (text === "💼 WORK") {
     u.coins += 20;
     await users.updateOne({ chatId }, { $set: u });
-
-    return bot.sendMessage(chatId, "💼 +20 coins", menu());
+    return bot.sendMessage(chatId, "+20 coins", mainMenu());
   }
 
   // CASE
   if (text === "📦 CASE") {
     const r = Math.random() < 0.7 ? 15 : 40;
     u.coins += r;
-
     await users.updateOne({ chatId }, { $set: u });
-
-    return bot.sendMessage(chatId, `📦 +${r} coins`, menu());
+    return bot.sendMessage(chatId, `+${r} coins`, mainMenu());
   }
 
   // PROFILE
   if (text === "👤 PROFILE") {
-    return bot.sendMessage(
-      chatId,
+    return bot.sendMessage(chatId,
 `👤 PROFILE
 
-🆔 ${chatId}
-👤 @${msg.from.username || "none"}
-
-💰 Coins: ${u.coins}
-💎 Diamonds: ${u.diamonds}`,
-      menu()
+💰 ${u.coins}
+💎 ${u.diamonds}`,
+      mainMenu()
     );
   }
 
   // CASINO
   if (text === "🎰 CASINO") {
     if (u.diamonds <= 0) {
-      return bot.sendMessage(chatId, "❌ 0💎", menu());
+      return bot.sendMessage(chatId, "❌ 0💎", mainMenu());
     }
 
-    return bot.sendMessage(
-      chatId,
+    return bot.sendMessage(chatId,
 `🎰 CASINO
 
-Використай:
 🎲 /dice
 🎯 /dart`,
-      menu()
+      mainMenu()
     );
   }
 
-  // DONATE
+  // ================= DONATE =================
   if (text === "💳 DONATE") {
-    return bot.sendMessage(
-      chatId,
-`💳 DONATE
-
-Оберіть банк:
-
-🏦 Abank
-🏦 Pumb
-
-Напишіть: Abank або Pumb`,
-      menu()
+    return bot.sendMessage(chatId,
+`💳 Вибери банк:`,
+      bankMenu()
     );
   }
 
-  // BANK SELECT
+  // ================= BANK SELECT =================
   if (text === "Abank" || text === "Pumb") {
     const card =
       text === "Abank"
         ? "4400005550111519"
         : "5355280028902177";
 
-    pending.set(chatId, { card });
+    pending.set(chatId, { card, step: "amount" });
 
-    return bot.sendMessage(
-      chatId,
-`💳 Карта:
-${card}
-
-💎 Введи кількість (мін 3)`,
-      menu()
+    return bot.sendMessage(chatId,
+`💎 Напиши скільки хочеш купити`,
+      bankMenu()
     );
   }
 
-  // AMOUNT INPUT
+  // ================= AMOUNT =================
   const amount = parseInt(text);
 
   if (!isNaN(amount)) {
+    const data = pending.get(chatId);
+    if (!data || data.step !== "amount") return;
+
     if (amount < 3) {
-      return bot.sendMessage(chatId, "❌ мін 3💎", menu());
+      return bot.sendMessage(chatId, "❌ мінімум 3💎", bankMenu());
     }
 
-    const data = pending.get(chatId);
-    if (!data) return;
+    const price = amount; // 1💎 = 1₴
 
     data.amount = amount;
+    data.step = "pay";
     pending.set(chatId, data);
 
-    const ADMIN_ID = process.env.ADMIN_ID;
+    return bot.sendMessage(chatId,
+`💳 Оплата
 
-    bot.sendMessage(chatId, "📩 надішли квитанцію");
+Карта:
+${data.card}
 
-    bot.sendMessage(
-      ADMIN_ID,
-`💳 NEW DONATE
+💰 До оплати: ${price}₴
 
-User: ${chatId}
-💎: ${amount}
-Card: ${data.card}`
+📩 Після оплати надішли квитанцію`,
+      mainMenu()
     );
   }
 });
@@ -196,7 +190,7 @@ bot.onText(/\/dice/, async (msg) => {
   const u = await getUser(chatId, msg.from.username);
 
   if (u.diamonds <= 0) {
-    return bot.sendMessage(chatId, "❌ 0💎", menu());
+    return bot.sendMessage(chatId, "❌ 0💎", mainMenu());
   }
 
   bot.sendDice(chatId).then(async (m) => {
@@ -212,7 +206,7 @@ bot.onText(/\/dice/, async (msg) => {
     u.diamonds += reward;
     await users.updateOne({ chatId }, { $set: u });
 
-    bot.sendMessage(chatId, `🎲 ${v} → +${reward}💎`, menu());
+    bot.sendMessage(chatId, `🎲 ${v} → +${reward}💎`, mainMenu());
   });
 });
 
@@ -222,7 +216,7 @@ bot.onText(/\/dart/, async (msg) => {
   const u = await getUser(chatId, msg.from.username);
 
   if (u.diamonds <= 0) {
-    return bot.sendMessage(chatId, "❌ 0💎", menu());
+    return bot.sendMessage(chatId, "❌ 0💎", mainMenu());
   }
 
   const hit = Math.random();
@@ -234,7 +228,7 @@ bot.onText(/\/dart/, async (msg) => {
   bot.sendMessage(chatId,
 `🎯 ${hit > 0.9 ? "CENTER" : "MISS"}
 +${reward}💎`,
-    menu()
+    mainMenu()
   );
 });
 
@@ -243,9 +237,14 @@ bot.on("photo", async (msg) => {
   const chatId = msg.chat.id;
   const ADMIN_ID = process.env.ADMIN_ID;
 
-  bot.sendMessage(chatId, "📩 відправлено адміну");
+  const data = pending.get(chatId);
 
   bot.sendPhoto(ADMIN_ID, msg.photo.at(-1).file_id, {
+    caption:
+`💳 DONATE
+
+User: ${chatId}
+💎: ${data?.amount || 0}`,
     reply_markup: {
       inline_keyboard: [
         [
@@ -255,6 +254,8 @@ bot.on("photo", async (msg) => {
       ]
     }
   });
+
+  bot.sendMessage(chatId, "📩 на перевірці");
 });
 
 // ================= ADMIN =================
@@ -264,7 +265,7 @@ bot.on("callback_query", async (q) => {
   const id = Number(q.data.split("_")[1]);
 
   if (approved.has(id)) {
-    return bot.answerCallbackQuery(q.id, { text: "Вже оброблено" });
+    return bot.answerCallbackQuery(q.id, { text: "Вже було" });
   }
 
   approved.add(id);
@@ -287,4 +288,4 @@ bot.on("callback_query", async (q) => {
   bot.answerCallbackQuery(q.id);
 });
 
-console.log("🚀 FULL GAME RUNNING");
+console.log("🚀 DONATE FLOW READY");
