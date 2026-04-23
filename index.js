@@ -13,7 +13,7 @@ const db = client.db("game");
 const users = db.collection("users");
 const payments = db.collection("payments");
 
-// PvP games (RAM)
+// PvP games
 const games = new Map();
 
 // ================= USER =================
@@ -78,10 +78,49 @@ function bankMenu() {
   };
 }
 
+function acceptMenu(id) {
+  return {
+    reply_markup: {
+      inline_keyboard: [
+        [
+          { text: "✅", callback_data: `accept_${id}` },
+          { text: "❌", callback_data: `decline_${id}` }
+        ]
+      ]
+    }
+  };
+}
+
 // ================= START =================
-bot.onText(/\/start/, async (msg) => {
+bot.onText(/\/start$/, async (msg) => {
   const u = await getUser(msg.chat.id, msg.from.username);
   bot.sendMessage(msg.chat.id, `🎮 GAME\n💎 ${u.diamonds}`, mainMenu());
+});
+
+// JOIN via link
+bot.onText(/\/start (.+)/, async (msg, match) => {
+  const chatId = msg.chat.id;
+  const param = match[1];
+
+  if (param.startsWith("join_")) {
+    const id = param.split("_")[1];
+    const game = games.get(id);
+
+    if (!game) return bot.sendMessage(chatId, "❌ гра не знайдена");
+    if (game.opponent) return bot.sendMessage(chatId, "❌ вже зайнято");
+    if (chatId === game.creator) return;
+
+    const u = await getUser(chatId);
+
+    if (u.diamonds < game.bet) {
+      return bot.sendMessage(chatId, "❌ недостатньо 💎");
+    }
+
+    game.opponent = chatId;
+
+    bot.sendMessage(game.creator, "👤 гравець зайшов", acceptMenu(id));
+    bot.sendMessage(chatId, "👤 ви зайшли", acceptMenu(id));
+  }
 });
 
 // ================= MAIN =================
@@ -108,7 +147,7 @@ bot.on("message", async (msg) => {
 
   if (text === "💼 WORK") {
     const now = Date.now();
-    const cd = 60 * 60 * 1000;
+    const cd = 3600000;
 
     if (now - u.lastWork < cd) {
       const left = Math.ceil((cd - (now - u.lastWork)) / 60000);
@@ -117,7 +156,6 @@ bot.on("message", async (msg) => {
 
     u.coins += 20;
     u.lastWork = now;
-
     await users.updateOne({ chatId }, { $set: u });
 
     return bot.sendMessage(chatId, "+20", coinsMenu());
@@ -125,7 +163,7 @@ bot.on("message", async (msg) => {
 
   if (text === "📦 CASE") {
     const now = Date.now();
-    const cd = 6 * 60 * 60 * 1000;
+    const cd = 6 * 3600000;
 
     if (now - u.lastCase < cd) {
       const left = Math.ceil((cd - (now - u.lastCase)) / 60000);
@@ -133,7 +171,6 @@ bot.on("message", async (msg) => {
     }
 
     const r = Math.random() < 0.7 ? 15 : 40;
-
     u.coins += r;
     u.lastCase = now;
 
@@ -148,9 +185,7 @@ bot.on("message", async (msg) => {
 `👤 PROFILE
 
 💰 ${u.coins}
-💎 ${u.diamonds}`,
-      mainMenu()
-    );
+💎 ${u.diamonds}`, mainMenu());
   }
 
   // CASINO
@@ -158,17 +193,12 @@ bot.on("message", async (msg) => {
     return bot.sendMessage(chatId,
 `🎰 CASINO
 
-🎲 Cubes`,
-      {
-        reply_markup: {
-          keyboard: [
-            ["🎲 Cubes"],
-            ["⬅ BACK"]
-          ],
-          resize_keyboard: true
-        }
+🎲 Cubes`, {
+      reply_markup: {
+        keyboard: [["🎲 Cubes"], ["⬅ BACK"]],
+        resize_keyboard: true
       }
-    );
+    });
   }
 
   // CREATE GAME
@@ -184,6 +214,9 @@ bot.on("message", async (msg) => {
     }
 
     const id = Math.random().toString(36).substring(2, 8);
+    const me = await bot.getMe();
+
+    const link = `https://t.me/${me.username}?start=join_${id}`;
 
     games.set(id, {
       creator: chatId,
@@ -197,10 +230,8 @@ bot.on("message", async (msg) => {
 `🎲 Гра створена
 
 💎 ${bet}
-Код: ${id}
 
-Напиши другу:
-/join ${id}`);
+🔗 ${link}`);
   }
 
   // DONATE
@@ -209,92 +240,80 @@ bot.on("message", async (msg) => {
   }
 
   if (text === "Abank" || text === "Pumb") {
-    const card =
-      text === "Abank"
-        ? "4400005550111519"
-        : "5355280028902177";
+    const card = text === "Abank"
+      ? "4400005550111519"
+      : "5355280028902177";
 
     await payments.insertOne({
       chatId,
       card,
-      amount: 0,
       status: "amount"
     });
 
-    return bot.sendMessage(chatId, "💎 amount?");
+    return bot.sendMessage(chatId, "💎 Введи кількість 💎");
   }
 
-  const amount = Number(text);
+  const diamonds = Number(text);
 
-  if (!isNaN(amount)) {
+  if (!isNaN(diamonds)) {
     const pay = await payments.findOne({ chatId, status: "amount" });
     if (!pay) return;
 
+    if (diamonds < 3) return bot.sendMessage(chatId, "❌ мін 3💎");
+
+    const price = Math.ceil(diamonds * 44.3 * 1.05);
+
     await payments.updateOne(
       { _id: pay._id },
-      { $set: { amount, status: "photo" } }
+      { $set: { amount: diamonds, price, status: "photo" } }
     );
 
     return bot.sendMessage(chatId,
 `💳 ${pay.card}
-💰 ${amount}₴
-📩 send receipt`);
+💎 ${diamonds}
+💰 ${price}₴
+
+📩 Кинь квитанцію`);
   }
 });
 
-// JOIN
+// JOIN command
 bot.onText(/\/join (.+)/, async (msg, match) => {
-  const chatId = msg.chat.id;
   const id = match[1];
-
   const game = games.get(id);
-  if (!game) return bot.sendMessage(chatId, "❌");
 
+  if (!game) return;
+
+  const chatId = msg.chat.id;
   const u = await getUser(chatId);
 
   if (u.diamonds < game.bet) return;
 
   game.opponent = chatId;
 
-  bot.sendMessage(game.creator, "✅ accept?", {
-    reply_markup: {
-      inline_keyboard: [
-        [{ text: "✅", callback_data: `accept_${id}` },
-         { text: "❌", callback_data: `decline_${id}` }]
-      ]
-    }
-  });
-
-  bot.sendMessage(chatId, "✅ accept?", {
-    reply_markup: {
-      inline_keyboard: [
-        [{ text: "✅", callback_data: `accept_${id}` },
-         { text: "❌", callback_data: `decline_${id}` }]
-      ]
-    }
-  });
+  bot.sendMessage(game.creator, "👤 гравець зайшов", acceptMenu(id));
+  bot.sendMessage(chatId, "👤 ви зайшли", acceptMenu(id));
 });
 
 // CALLBACK
 bot.on("callback_query", async (q) => {
   const data = q.data;
+  bot.answerCallbackQuery(q.id);
 
   if (data.startsWith("accept_") || data.startsWith("decline_")) {
     const id = data.split("_")[1];
     const game = games.get(id);
     if (!game) return;
 
-    const userId = q.message.chat.id;
-
-    bot.answerCallbackQuery(q.id);
-
     if (data.startsWith("decline_")) {
       games.delete(id);
       return;
     }
 
-    if (!game.accepted.includes(userId)) {
-      game.accepted.push(userId);
+    const uid = q.message.chat.id;
+
+    if (!game.accepted.includes(uid)) {
+      game.accepted.push(uid);
     }
 
     if (game.accepted.length === 2) {
@@ -302,13 +321,10 @@ bot.on("callback_query", async (q) => {
     }
   }
 
-  // ADMIN APPROVE
   if (data.startsWith("approve_") || data.startsWith("reject_")) {
     const id = data.split("_")[1];
-
-    bot.answerCallbackQuery(q.id);
-
     const pay = await payments.findOne({ _id: new ObjectId(id) });
+
     if (!pay || pay.status !== "pending") return;
 
     if (data.startsWith("approve_")) {
@@ -338,22 +354,22 @@ bot.on("callback_query", async (q) => {
 bot.onText(/\/roll/, async (msg) => {
   const chatId = msg.chat.id;
 
-  const game = [...games.entries()].find(([id, g]) =>
+  const entry = [...games.entries()].find(([id, g]) =>
     g.creator === chatId || g.opponent === chatId
   );
 
-  if (!game) return;
+  if (!entry) return;
 
-  const [id, g] = game;
+  const [id, g] = entry;
 
   bot.sendDice(chatId).then(async (m) => {
-    const val = m.dice.value;
+    const v = m.dice.value;
 
     if (chatId === g.creator) {
-      g.rolls.c = val;
+      g.rolls.c = v;
       bot.sendMessage(g.opponent, "🎲 /roll");
     } else {
-      g.rolls.o = val;
+      g.rolls.o = v;
 
       const winner = g.rolls.c > g.rolls.o ? g.creator : g.opponent;
 
@@ -381,29 +397,31 @@ bot.on("photo", async (msg) => {
   );
 
   bot.sendPhoto(process.env.ADMIN_ID, msg.photo.at(-1).file_id, {
-    caption: `${pay.amount}`,
+    caption: `💎 ${pay.amount} | ${pay.price}₴`,
     reply_markup: {
       inline_keyboard: [
-        [{ text: "✅", callback_data: `approve_${pay._id}` },
-         { text: "❌", callback_data: `reject_${pay._id}` }]
+        [
+          { text: "✅", callback_data: `approve_${pay._id}` },
+          { text: "❌", callback_data: `reject_${pay._id}` }
+        ]
       ]
     }
   });
 });
 
-// ADMIN BALANCES
+// ADMIN
 bot.onText(/\/balances/, async (msg) => {
   if (String(msg.chat.id) !== String(process.env.ADMIN_ID)) return;
 
   const list = await users.find({}).limit(50).toArray();
 
-  let t = "";
+  let t = "📊\n\n";
 
   for (const u of list) {
-    t += `${u.chatId} | ${u.coins} | ${u.diamonds}\n`;
+    t += `${u.chatId} | 💰${u.coins} | 💎${u.diamonds}\n`;
   }
 
   bot.sendMessage(msg.chat.id, t);
 });
 
-console.log("🚀 PvP CASINO READY");
+console.log("🚀 FULL PvP CASINO + DONATE READY");
