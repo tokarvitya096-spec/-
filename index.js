@@ -1,103 +1,57 @@
-import dotenv from "dotenv";
-import TelegramBot from "node-telegram-bot-api";
-import { MongoClient, ObjectId } from "mongodb";
+// Telegram Tapalka Bot (Node.js + MongoDB)
+// npm i node-telegram-bot-api mongoose dotenv
 
-dotenv.config();
+require('dotenv').config();
+const TelegramBot = require('node-telegram-bot-api');
+const mongoose = require('mongoose');
 
 const bot = new TelegramBot(process.env.BOT_TOKEN, { polling: true });
 
-const client = new MongoClient(process.env.MONGO_URL);
-await client.connect();
+// ===== MongoDB =====
+mongoose.connect(process.env.MONGO_URI)
+  .then(() => console.log('MongoDB connected'))
+  .catch(err => console.log(err));
 
-const db = client.db("game");
-const users = db.collection("users");
-const payments = db.collection("payments");
+const userSchema = new mongoose.Schema({
+  userId: Number,
+  username: String,
+  coins: { type: Number, default: 0 },
+  crystals: { type: Number, default: 0 },
+  first: { type: Boolean, default: true },
+  createdAt: { type: Date, default: Date.now }
+});
 
-const games = new Map();
+const User = mongoose.model('User', userSchema);
 
-// ================= USER =================
-async function getUser(chatId, username) {
-  let u = await users.findOne({ chatId });
+// ===== Helpers =====
+async function getUser(from) {
+  let user = await User.findOne({ userId: from.id });
 
-  if (!u) {
-    u = {
-      chatId,
-      username: username || "player",
-      coins: 100,
-      diamonds: 0,
-      lastWork: 0,
-      lastCase: 0,
-      state: null,
-      card: null,
+  if (!user) {
+    user = await User.create({
+      userId: from.id,
+      username: from.username || 'no_username',
       first: true
-    };
-    await users.insertOne(u);
+    });
   }
 
-  if (typeof u.coins !== "number") u.coins = 0;
-  if (typeof u.diamonds !== "number") u.diamonds = 0;
-
-  return u;
+  return user;
 }
 
-// ================= MENUS =================
-function mainMenu() {
-  return {
-    reply_markup: {
-      keyboard: [
-        ["🪙 Coins", "🎰 Casino"],
-        ["💳 Donate", "👤 Profile"]
-      ],
-      resize_keyboard: true
-    }
-  };
-}
+// ===== START =====
+bot.onText(/\/start/, async (msg) => {
+  const user = await getUser(msg.from);
 
-function coinsMenu() {
-  return {
-    reply_markup: {
-      keyboard: [
-        ["⛏ FARM", "💼 WORK"],
-        ["📦 CASE"],
-        ["⬅ BACK"]
-      ],
-      resize_keyboard: true
-    }
-  };
-}
+  // first time user
+  if (user.first) {
+    await User.updateOne(
+      { userId: msg.from.id },
+      { $set: { first: false } }
+    );
 
-function bankMenu() {
-  return {
-    reply_markup: {
-      keyboard: [
-        ["Abank", "Pumb"],
-        ["⬅ BACK"]
-      ],
-      resize_keyboard: true
-    }
-  };
-}
-
-function acceptMenu(id) {
-  return {
-    reply_markup: {
-      inline_keyboard: [
-        [
-          { text: "✅", callback_data: `accept_${id}` },
-          { text: "❌", callback_data: `decline_${id}` }
-        ]
-      ]
-    }
-  };
-}
-
-// ================= START =================
-bot.onText(/\/start$/, async (msg) => {
-  const u = await getUser(msg.chat.id, msg.from.username);
-
-  if (u.first) {
-    return bot.sendMessage(msg.chat.id,
-      "▶️ Натисни START",
+    return bot.sendMessage(
+      msg.chat.id,
+      "▶️ Натисни START щоб почати",
       {
         reply_markup: {
           keyboard: [["▶️ START"]],
@@ -107,210 +61,108 @@ bot.onText(/\/start$/, async (msg) => {
     );
   }
 
-  bot.sendMessage(msg.chat.id, "🎮 GAME", mainMenu());
+  const options = {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '🎮 Грати', callback_data: 'play' }],
+        [{ text: '💎 Донат', callback_data: 'donate' }]
+      ]
+    }
+  };
+
+  bot.sendMessage(
+    msg.chat.id,
+    `Привіт ${msg.from.first_name}!\nТвій баланс: ${user.coins} 💰 | ${user.crystals} 💎`,
+    options
+  );
 });
 
-// JOIN через посилання
-bot.onText(/\/start (.+)/, async (msg, match) => {
-  const chatId = msg.chat.id;
-  const param = match[1];
+// ===== START BUTTON =====
+bot.on('message', async (msg) => {
+  if (msg.text !== '▶️ START') return;
 
-  if (!param.startsWith("join_")) return;
+  const user = await getUser(msg.from);
 
-  const id = param.split("_")[1];
-  const game = games.get(id);
+  return bot.sendMessage(msg.chat.id, "🎮 GAME STARTED", {
+    reply_markup: {
+      remove_keyboard: true
+    }
+  });
+});
 
-  if (!game) return bot.sendMessage(chatId, "❌ гра не знайдена");
-  if (game.opponent) return bot.sendMessage(chatId, "❌ вже зайнято");
-  if (chatId === game.creator) return;
+// ===== Buttons =====
+bot.on('callback_query', async (query) => {
+  const user = await getUser(query.from);
 
-  const u = await getUser(chatId);
+  if (query.data === 'play') {
+    user.coins += 1;
+    await user.save();
 
-  if (u.diamonds < game.bet) {
-    return bot.sendMessage(chatId, "❌ недостатньо 💎");
+    bot.answerCallbackQuery(query.id, { text: '+1 💰' });
   }
 
-  game.opponent = chatId;
-
-  bot.sendMessage(game.creator, "👤 гравець зайшов", acceptMenu(id));
-  bot.sendMessage(chatId, "👤 ви зайшли", acceptMenu(id));
-});
-
-// ================= MAIN =================
-bot.on("message", async (msg) => {
-  if (!msg.text) return;
-
-  const chatId = msg.chat.id;
-  const text = msg.text;
-
-  if (text.startsWith("/")) return;
-
-  const u = await getUser(chatId, msg.from.username);
-
-  // START SCREEN
-  if (text === "▶️ START") {
-    await users.updateOne({ chatId }, { $set: { first: false } });
-
-    return bot.sendPhoto(chatId,
-      "file_0000000045e871fd8c54554c27771884",
-      {
-        caption: "👋 Вітаю вас у PV Empire",
-        ...mainMenu()
-      }
+  if (query.data === 'donate') {
+    bot.sendMessage(
+      query.message.chat.id,
+      'Введи кількість 💎 для донату (наприклад: 10)'
     );
   }
+});
 
-  if (text === "⬅ BACK") {
-    await users.updateOne({ chatId }, { $set: { state: null } });
-    return bot.sendMessage(chatId, "🔙", mainMenu());
-  }
+// ===== Donate system =====
+bot.on('message', async (msg) => {
+  const user = await getUser(msg.from);
 
-  // COINS
-  if (text === "🪙 Coins") return bot.sendMessage(chatId, "🪙 Menu", coinsMenu());
+  if (!msg.text) return;
 
-  if (text === "⛏ FARM") {
-    u.coins += 10;
-    await users.updateOne({ chatId }, { $set: u });
-    return bot.sendMessage(chatId, "+10", coinsMenu());
-  }
+  if (!isNaN(msg.text)) {
+    const amount = parseInt(msg.text);
 
-  if (text === "💼 WORK") {
-    const now = Date.now();
-    if (now - u.lastWork < 3600000) {
-      const left = Math.ceil((3600000 - (now - u.lastWork)) / 60000);
-      return bot.sendMessage(chatId, `⏳ ${left} хв`);
-    }
+    if (amount > 0) {
+      const rate = 10;
+      const bonus = Math.floor(amount * rate * 0.1);
 
-    u.coins += 20;
-    u.lastWork = now;
-    await users.updateOne({ chatId }, { $set: u });
+      user.crystals += amount;
+      user.coins += amount * rate + bonus;
+      await user.save();
 
-    return bot.sendMessage(chatId, "+20", coinsMenu());
-  }
-
-  if (text === "📦 CASE") {
-    const now = Date.now();
-    if (now - u.lastCase < 21600000) {
-      const left = Math.ceil((21600000 - (now - u.lastCase)) / 60000);
-      return bot.sendMessage(chatId, `⏳ ${left} хв`);
-    }
-
-    const r = Math.random() < 0.7 ? 15 : 40;
-    u.coins += r;
-    u.lastCase = now;
-
-    await users.updateOne({ chatId }, { $set: u });
-
-    return bot.sendMessage(chatId, `+${r}`, coinsMenu());
-  }
-
-  // PROFILE
-  if (text === "👤 Profile") {
-    return bot.sendMessage(chatId,
-`👤 PROFILE
-
-💰 ${u.coins}
-💎 ${u.diamonds}`, mainMenu());
-  }
-
-  // CASINO
-  if (text === "🎰 Casino") {
-    return bot.sendMessage(chatId,
-`🎰 CASINO
-
-🎲 Cubes`, {
-      reply_markup: {
-        keyboard: [["🎲 Cubes"], ["⬅ BACK"]],
-        resize_keyboard: true
-      }
-    });
-  }
-
-  if (text === "🎲 Cubes") {
-    await users.updateOne({ chatId }, { $set: { state: "casino_bet" } });
-    return bot.sendMessage(chatId, "💎 Введи ставку");
-  }
-
-  // DONATE
-  if (text === "💳 Donate") {
-    return bot.sendMessage(chatId, "💳 Bank:", bankMenu());
-  }
-
-  if (text === "Abank" || text === "Pumb") {
-    const card = text === "Abank"
-      ? "4400005550111519"
-      : "5355280028902177";
-
-    await users.updateOne({ chatId }, { $set: { state: "donate_amount", card } });
-
-    return bot.sendMessage(chatId, "💎 Введи кількість 💎");
-  }
-
-  // NUMBER HANDLER
-  const num = parseFloat(text);
-
-  if (!isNaN(num)) {
-
-    // DONATE
-    if (u.state === "donate_amount") {
-      if (num < 3) return bot.sendMessage(chatId, "❌ мін 3💎");
-
-      const price = Math.ceil(num * 44.3 * 1.05);
-
-      await payments.insertOne({
-        chatId,
-        amount: num,
-        price,
-        card: u.card,
-        status: "photo"
-      });
-
-      await users.updateOne({ chatId }, { $set: { state: null } });
-
-      return bot.sendMessage(chatId,
-`💳 ${u.card}
-
-💎 ${num}
-📊 Курс: 1💎 = 1$ = 44.3₴
-➕ Комісія: +5%
-
-💰 До оплати: ${price}₴
-
-📩 Кинь квитанцію`);
-    }
-
-    // CASINO
-    if (u.state === "casino_bet") {
-      if (u.diamonds < num) {
-        return bot.sendMessage(chatId, "❌ недостатньо 💎");
-      }
-
-      const id = Math.random().toString(36).substring(2, 8);
-      const me = await bot.getMe();
-
-      const link = `https://t.me/${me.username}?start=join_${id}`;
-
-      games.set(id, {
-        creator: chatId,
-        bet: num,
-        opponent: null,
-        accepted: [],
-        rolls: {}
-      });
-
-      await users.updateOne({ chatId }, { $set: { state: null } });
-
-      return bot.sendMessage(chatId,
-`🎲 Гра створена
-
-💎 ${num}
-
-🔗 ${link}`);
+      bot.sendMessage(
+        msg.chat.id,
+        `💎 Донат прийнято!\n+${amount} 💎\n+${amount * rate + bonus} 💰 (з бонусом)`
+      );
     }
   }
 });
 
-// ================= OTHER =================
-// (callback, roll, receipt, admin — залиш як було у тебе, вони вже ок)
+// ===== Admin =====
+const admins = (process.env.ADMINS || '').split(',');
 
-console.log("🚀 PV EMPIRE READY");
+bot.onText(/\/addcoins (.+)/, async (msg, match) => {
+  if (!admins.includes(String(msg.from.id))) return;
+
+  const [id, amount] = match[1].split(' ');
+  const user = await User.findOne({ userId: id });
+
+  if (!user) return msg.reply('User not found');
+
+  user.coins += Number(amount);
+  await user.save();
+
+  msg.reply('Coins added');
+});
+
+bot.onText(/\/addcrystals (.+)/, async (msg, match) => {
+  if (!admins.includes(String(msg.from.id))) return;
+
+  const [id, amount] = match[1].split(' ');
+  const user = await User.findOne({ userId: id });
+
+  if (!user) return msg.reply('User not found');
+
+  user.crystals += Number(amount);
+  await user.save();
+
+  msg.reply('Crystals added');
+});
+
+console.log('Bot started');
