@@ -28,7 +28,8 @@ async function getUser(chatId, username) {
       lastWork: 0,
       lastCase: 0,
       state: null,
-      card: null
+      card: null,
+      first: true
     };
     await users.insertOne(u);
   }
@@ -93,7 +94,20 @@ function acceptMenu(id) {
 // ================= START =================
 bot.onText(/\/start$/, async (msg) => {
   const u = await getUser(msg.chat.id, msg.from.username);
-  bot.sendMessage(msg.chat.id, `🎮 GAME\n💎 ${u.diamonds}`, mainMenu());
+
+  if (u.first) {
+    return bot.sendMessage(msg.chat.id,
+      "▶️ Натисни START",
+      {
+        reply_markup: {
+          keyboard: [["▶️ START"]],
+          resize_keyboard: true
+        }
+      }
+    );
+  }
+
+  bot.sendMessage(msg.chat.id, "🎮 GAME", mainMenu());
 });
 
 // JOIN через посилання
@@ -133,6 +147,19 @@ bot.on("message", async (msg) => {
 
   const u = await getUser(chatId, msg.from.username);
 
+  // START SCREEN
+  if (text === "▶️ START") {
+    await users.updateOne({ chatId }, { $set: { first: false } });
+
+    return bot.sendPhoto(chatId,
+      "file_0000000045e871fd8c54554c27771884",
+      {
+        caption: "👋 Вітаю вас у PV Empire",
+        ...mainMenu()
+      }
+    );
+  }
+
   if (text === "⬅ BACK") {
     await users.updateOne({ chatId }, { $set: { state: null } });
     return bot.sendMessage(chatId, "🔙", mainMenu());
@@ -149,16 +176,13 @@ bot.on("message", async (msg) => {
 
   if (text === "💼 WORK") {
     const now = Date.now();
-    const cd = 3600000;
-
-    if (now - u.lastWork < cd) {
-      const left = Math.ceil((cd - (now - u.lastWork)) / 60000);
+    if (now - u.lastWork < 3600000) {
+      const left = Math.ceil((3600000 - (now - u.lastWork)) / 60000);
       return bot.sendMessage(chatId, `⏳ ${left} хв`);
     }
 
     u.coins += 20;
     u.lastWork = now;
-
     await users.updateOne({ chatId }, { $set: u });
 
     return bot.sendMessage(chatId, "+20", coinsMenu());
@@ -166,15 +190,12 @@ bot.on("message", async (msg) => {
 
   if (text === "📦 CASE") {
     const now = Date.now();
-    const cd = 6 * 3600000;
-
-    if (now - u.lastCase < cd) {
-      const left = Math.ceil((cd - (now - u.lastCase)) / 60000);
+    if (now - u.lastCase < 21600000) {
+      const left = Math.ceil((21600000 - (now - u.lastCase)) / 60000);
       return bot.sendMessage(chatId, `⏳ ${left} хв`);
     }
 
     const r = Math.random() < 0.7 ? 15 : 40;
-
     u.coins += r;
     u.lastCase = now;
 
@@ -206,11 +227,7 @@ bot.on("message", async (msg) => {
   }
 
   if (text === "🎲 Cubes") {
-    await users.updateOne(
-      { chatId },
-      { $set: { state: "casino_bet" } }
-    );
-
+    await users.updateOne({ chatId }, { $set: { state: "casino_bet" } });
     return bot.sendMessage(chatId, "💎 Введи ставку");
   }
 
@@ -224,15 +241,12 @@ bot.on("message", async (msg) => {
       ? "4400005550111519"
       : "5355280028902177";
 
-    await users.updateOne(
-      { chatId },
-      { $set: { state: "donate_amount", card } }
-    );
+    await users.updateOne({ chatId }, { $set: { state: "donate_amount", card } });
 
     return bot.sendMessage(chatId, "💎 Введи кількість 💎");
   }
 
-  // ================= NUMBER HANDLER =================
+  // NUMBER HANDLER
   const num = parseFloat(text);
 
   if (!isNaN(num)) {
@@ -255,8 +269,12 @@ bot.on("message", async (msg) => {
 
       return bot.sendMessage(chatId,
 `💳 ${u.card}
+
 💎 ${num}
-💰 ${price}₴
+📊 Курс: 1💎 = 1$ = 44.3₴
+➕ Комісія: +5%
+
+💰 До оплати: ${price}₴
 
 📩 Кинь квитанцію`);
     }
@@ -292,133 +310,7 @@ bot.on("message", async (msg) => {
   }
 });
 
-// CALLBACK (accept / donate)
-bot.on("callback_query", async (q) => {
-  const data = q.data;
-  bot.answerCallbackQuery(q.id);
+// ================= OTHER =================
+// (callback, roll, receipt, admin — залиш як було у тебе, вони вже ок)
 
-  if (data.startsWith("accept_") || data.startsWith("decline_")) {
-    const id = data.split("_")[1];
-    const game = games.get(id);
-    if (!game) return;
-
-    if (data.startsWith("decline_")) {
-      games.delete(id);
-      return;
-    }
-
-    const uid = q.message.chat.id;
-
-    if (!game.accepted.includes(uid)) {
-      game.accepted.push(uid);
-    }
-
-    if (game.accepted.length === 2) {
-      bot.sendMessage(game.creator, "🎲 /roll");
-    }
-  }
-
-  if (data.startsWith("approve_") || data.startsWith("reject_")) {
-    const id = data.split("_")[1];
-    const pay = await payments.findOne({ _id: new ObjectId(id) });
-
-    if (!pay || pay.status !== "pending") return;
-
-    if (data.startsWith("approve_")) {
-      await users.updateOne(
-        { chatId: pay.chatId },
-        { $inc: { diamonds: pay.amount } }
-      );
-
-      await payments.updateOne(
-        { _id: pay._id },
-        { $set: { status: "approved" } }
-      );
-
-      bot.sendMessage(pay.chatId, `+${pay.amount}💎`);
-    }
-
-    if (data.startsWith("reject_")) {
-      await payments.updateOne(
-        { _id: pay._id },
-        { $set: { status: "rejected" } }
-      );
-    }
-  }
-});
-
-// ROLL
-bot.onText(/\/roll/, async (msg) => {
-  const chatId = msg.chat.id;
-
-  const entry = [...games.entries()].find(([id, g]) =>
-    g.creator === chatId || g.opponent === chatId
-  );
-
-  if (!entry) return;
-
-  const [id, g] = entry;
-
-  bot.sendDice(chatId).then(async (m) => {
-    const v = m.dice.value;
-
-    if (chatId === g.creator) {
-      g.rolls.c = v;
-      bot.sendMessage(g.opponent, "🎲 /roll");
-    } else {
-      g.rolls.o = v;
-
-      const winner = g.rolls.c > g.rolls.o ? g.creator : g.opponent;
-
-      await users.updateOne(
-        { chatId: winner },
-        { $inc: { diamonds: g.bet * 2 } }
-      );
-
-      bot.sendMessage(g.creator, `🏆 ${winner}`);
-      bot.sendMessage(g.opponent, `🏆 ${winner}`);
-
-      games.delete(id);
-    }
-  });
-});
-
-// RECEIPT
-bot.on("photo", async (msg) => {
-  const pay = await payments.findOne({ chatId: msg.chat.id, status: "photo" });
-  if (!pay) return;
-
-  await payments.updateOne(
-    { _id: pay._id },
-    { $set: { status: "pending" } }
-  );
-
-  bot.sendPhoto(process.env.ADMIN_ID, msg.photo.at(-1).file_id, {
-    caption: `💎 ${pay.amount} | ${pay.price}₴`,
-    reply_markup: {
-      inline_keyboard: [
-        [
-          { text: "✅", callback_data: `approve_${pay._id}` },
-          { text: "❌", callback_data: `reject_${pay._id}` }
-        ]
-      ]
-    }
-  });
-});
-
-// ADMIN
-bot.onText(/\/balances/, async (msg) => {
-  if (String(msg.chat.id) !== String(process.env.ADMIN_ID)) return;
-
-  const list = await users.find({}).limit(50).toArray();
-
-  let t = "📊\n\n";
-
-  for (const u of list) {
-    t += `${u.chatId} | 💰${u.coins} | 💎${u.diamonds}\n`;
-  }
-
-  bot.sendMessage(msg.chat.id, t);
-});
-
-console.log("🚀 FINAL VERSION WORKING");
+console.log("🚀 PV EMPIRE READY");
