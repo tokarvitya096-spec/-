@@ -13,7 +13,6 @@ const db = client.db("game");
 const users = db.collection("users");
 const payments = db.collection("payments");
 
-// PvP games
 const games = new Map();
 
 // ================= USER =================
@@ -27,15 +26,15 @@ async function getUser(chatId, username) {
       coins: 100,
       diamonds: 0,
       lastWork: 0,
-      lastCase: 0
+      lastCase: 0,
+      state: null,
+      card: null
     };
     await users.insertOne(u);
   }
 
   if (typeof u.coins !== "number") u.coins = 0;
   if (typeof u.diamonds !== "number") u.diamonds = 0;
-  if (typeof u.lastWork !== "number") u.lastWork = 0;
-  if (typeof u.lastCase !== "number") u.lastCase = 0;
 
   return u;
 }
@@ -97,30 +96,30 @@ bot.onText(/\/start$/, async (msg) => {
   bot.sendMessage(msg.chat.id, `🎮 GAME\n💎 ${u.diamonds}`, mainMenu());
 });
 
-// JOIN via link
+// JOIN через посилання
 bot.onText(/\/start (.+)/, async (msg, match) => {
   const chatId = msg.chat.id;
   const param = match[1];
 
-  if (param.startsWith("join_")) {
-    const id = param.split("_")[1];
-    const game = games.get(id);
+  if (!param.startsWith("join_")) return;
 
-    if (!game) return bot.sendMessage(chatId, "❌ гра не знайдена");
-    if (game.opponent) return bot.sendMessage(chatId, "❌ вже зайнято");
-    if (chatId === game.creator) return;
+  const id = param.split("_")[1];
+  const game = games.get(id);
 
-    const u = await getUser(chatId);
+  if (!game) return bot.sendMessage(chatId, "❌ гра не знайдена");
+  if (game.opponent) return bot.sendMessage(chatId, "❌ вже зайнято");
+  if (chatId === game.creator) return;
 
-    if (u.diamonds < game.bet) {
-      return bot.sendMessage(chatId, "❌ недостатньо 💎");
-    }
+  const u = await getUser(chatId);
 
-    game.opponent = chatId;
-
-    bot.sendMessage(game.creator, "👤 гравець зайшов", acceptMenu(id));
-    bot.sendMessage(chatId, "👤 ви зайшли", acceptMenu(id));
+  if (u.diamonds < game.bet) {
+    return bot.sendMessage(chatId, "❌ недостатньо 💎");
   }
+
+  game.opponent = chatId;
+
+  bot.sendMessage(game.creator, "👤 гравець зайшов", acceptMenu(id));
+  bot.sendMessage(chatId, "👤 ви зайшли", acceptMenu(id));
 });
 
 // ================= MAIN =================
@@ -134,7 +133,10 @@ bot.on("message", async (msg) => {
 
   const u = await getUser(chatId, msg.from.username);
 
-  if (text === "⬅ BACK") return bot.sendMessage(chatId, "🔙", mainMenu());
+  if (text === "⬅ BACK") {
+    await users.updateOne({ chatId }, { $set: { state: null } });
+    return bot.sendMessage(chatId, "🔙", mainMenu());
+  }
 
   // COINS
   if (text === "🪙 Coins") return bot.sendMessage(chatId, "🪙 Menu", coinsMenu());
@@ -156,6 +158,7 @@ bot.on("message", async (msg) => {
 
     u.coins += 20;
     u.lastWork = now;
+
     await users.updateOne({ chatId }, { $set: u });
 
     return bot.sendMessage(chatId, "+20", coinsMenu());
@@ -171,6 +174,7 @@ bot.on("message", async (msg) => {
     }
 
     const r = Math.random() < 0.7 ? 15 : 40;
+
     u.coins += r;
     u.lastCase = now;
 
@@ -201,37 +205,13 @@ bot.on("message", async (msg) => {
     });
   }
 
-  // CREATE GAME
   if (text === "🎲 Cubes") {
-    return bot.sendMessage(chatId, "💎 Введи ставку (мін 0.10)");
-  }
+    await users.updateOne(
+      { chatId },
+      { $set: { state: "casino_bet" } }
+    );
 
-  const bet = parseFloat(text);
-
-  if (!isNaN(bet) && bet >= 0.1) {
-    if (u.diamonds < bet) {
-      return bot.sendMessage(chatId, "❌ недостатньо 💎");
-    }
-
-    const id = Math.random().toString(36).substring(2, 8);
-    const me = await bot.getMe();
-
-    const link = `https://t.me/${me.username}?start=join_${id}`;
-
-    games.set(id, {
-      creator: chatId,
-      bet,
-      opponent: null,
-      accepted: [],
-      rolls: {}
-    });
-
-    return bot.sendMessage(chatId,
-`🎲 Гра створена
-
-💎 ${bet}
-
-🔗 ${link}`);
+    return bot.sendMessage(chatId, "💎 Введи ставку");
   }
 
   // DONATE
@@ -244,58 +224,75 @@ bot.on("message", async (msg) => {
       ? "4400005550111519"
       : "5355280028902177";
 
-    await payments.insertOne({
-      chatId,
-      card,
-      status: "amount"
-    });
+    await users.updateOne(
+      { chatId },
+      { $set: { state: "donate_amount", card } }
+    );
 
     return bot.sendMessage(chatId, "💎 Введи кількість 💎");
   }
 
-  const diamonds = Number(text);
+  // ================= NUMBER HANDLER =================
+  const num = parseFloat(text);
 
-  if (!isNaN(diamonds)) {
-    const pay = await payments.findOne({ chatId, status: "amount" });
-    if (!pay) return;
+  if (!isNaN(num)) {
 
-    if (diamonds < 3) return bot.sendMessage(chatId, "❌ мін 3💎");
+    // DONATE
+    if (u.state === "donate_amount") {
+      if (num < 3) return bot.sendMessage(chatId, "❌ мін 3💎");
 
-    const price = Math.ceil(diamonds * 44.3 * 1.05);
+      const price = Math.ceil(num * 44.3 * 1.05);
 
-    await payments.updateOne(
-      { _id: pay._id },
-      { $set: { amount: diamonds, price, status: "photo" } }
-    );
+      await payments.insertOne({
+        chatId,
+        amount: num,
+        price,
+        card: u.card,
+        status: "photo"
+      });
 
-    return bot.sendMessage(chatId,
-`💳 ${pay.card}
-💎 ${diamonds}
+      await users.updateOne({ chatId }, { $set: { state: null } });
+
+      return bot.sendMessage(chatId,
+`💳 ${u.card}
+💎 ${num}
 💰 ${price}₴
 
 📩 Кинь квитанцію`);
+    }
+
+    // CASINO
+    if (u.state === "casino_bet") {
+      if (u.diamonds < num) {
+        return bot.sendMessage(chatId, "❌ недостатньо 💎");
+      }
+
+      const id = Math.random().toString(36).substring(2, 8);
+      const me = await bot.getMe();
+
+      const link = `https://t.me/${me.username}?start=join_${id}`;
+
+      games.set(id, {
+        creator: chatId,
+        bet: num,
+        opponent: null,
+        accepted: [],
+        rolls: {}
+      });
+
+      await users.updateOne({ chatId }, { $set: { state: null } });
+
+      return bot.sendMessage(chatId,
+`🎲 Гра створена
+
+💎 ${num}
+
+🔗 ${link}`);
+    }
   }
 });
 
-// JOIN command
-bot.onText(/\/join (.+)/, async (msg, match) => {
-  const id = match[1];
-  const game = games.get(id);
-
-  if (!game) return;
-
-  const chatId = msg.chat.id;
-  const u = await getUser(chatId);
-
-  if (u.diamonds < game.bet) return;
-
-  game.opponent = chatId;
-
-  bot.sendMessage(game.creator, "👤 гравець зайшов", acceptMenu(id));
-  bot.sendMessage(chatId, "👤 ви зайшли", acceptMenu(id));
-});
-
-// CALLBACK
+// CALLBACK (accept / donate)
 bot.on("callback_query", async (q) => {
   const data = q.data;
   bot.answerCallbackQuery(q.id);
@@ -424,4 +421,4 @@ bot.onText(/\/balances/, async (msg) => {
   bot.sendMessage(msg.chat.id, t);
 });
 
-console.log("🚀 FULL PvP CASINO + DONATE READY");
+console.log("🚀 FINAL VERSION WORKING");
